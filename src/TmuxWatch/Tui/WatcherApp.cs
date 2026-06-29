@@ -55,6 +55,11 @@ public sealed class WatcherApp
         var pollMs = (int)(_cfg.PollIntervalSeconds * 1000);
         string? lastError = null;
 
+        // Start on a clean screen so the watcher is the only thing in the terminal,
+        // regardless of how it was launched (go scripts, dotnet run, published binary).
+        // Also wipes any build/restore output `dotnet run` may have printed.
+        AnsiConsole.Clear();
+
         var initial = BuildView(new List<TrackedPaneView>(), null, DateTimeOffset.UtcNow);
 
         AnsiConsole.Live(initial)
