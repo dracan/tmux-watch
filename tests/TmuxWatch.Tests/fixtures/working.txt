@@ -1,0 +1,11 @@
+● Synthetic fixture — a Copilot pane actively working (no real content).
+
+● Run a sample task (shell)
+  │ echo "doing some work"
+  └ 2 lines...
+
+ C:\sample\path                                                          Session: 0 AIC used
+────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────
+ ◎ Working esc cancel                                            Claude Opus 4.8 · 1M context

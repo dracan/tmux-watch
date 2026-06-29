@@ -1,0 +1,14 @@
+○ Asking user Synthetic question for the ask_user fixture (no real content)...
+
+╭──────────────────────────────────────────────────────────────╮
+│ Question                                                       │
+│ ────────────────────────────────────────────────────────────── │
+│ Which sample option would you like?                            │
+│                                                                │
+│ ❯ 1. Option A                                                  │
+│   2. Option B                                                  │
+│   3. Option C                                                  │
+│   4. Other (type your answer)                                  │
+│                                                                │
+│ ↑/↓ to select · enter to confirm · esc to cancel               │
+╰──────────────────────────────────────────────────────────────╯

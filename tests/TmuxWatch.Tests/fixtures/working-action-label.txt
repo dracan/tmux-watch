@@ -1,0 +1,8 @@
+● Synthetic fixture — a Copilot pane actively working, newer footer that shows the
+  current action label instead of the literal word "Working" (no real content).
+
+● Now the implementation - insert the 4 methods after DoSampleWorkAsync:
+
+ C:\sample\path                                                          Session: 850 AIC used
+›
+ ◉ Adding WidgetResource + SampleRequest contracts esc cancel    Claude Opus 4.8 · 1M context

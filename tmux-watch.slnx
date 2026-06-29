@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TmuxWatch/TmuxWatch.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TmuxWatch.Tests/TmuxWatch.Tests.csproj" />
+  </Folder>
+</Solution>

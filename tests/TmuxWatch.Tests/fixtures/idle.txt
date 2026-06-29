@@ -1,0 +1,12 @@
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+● Synthetic fixture — a fresh / idle Copilot pane (no real content).
+
+ C:\sample\path                                                          Session: 0 AIC used
+────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────
+ / commands · ? help · space hold to record                      Claude Opus 4.8 · 1M context

@@ -1,0 +1,10 @@
+╭─[1]─Local branches─────────────────────────────────────╮
+│  * a1b2c3d4 main                                        │
+│    e5f6a7b8 feature/example-one                         │
+│    99887766 feature/example-two                         │
+│                                                         │
+│                                                         │
+│                                                         │
+│                                                         │
+╰──────────────────────────────────────────────────1 of 3─╯
+Checkout: <space> | New branch: n        Sample Footer 0.0.0
