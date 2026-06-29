@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: Identify Copilot panes`
+- TO: `### Requirement: Identify agent panes`
+
 ## MODIFIED Requirements
 
 ### Requirement: Identify agent panes

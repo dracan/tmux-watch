@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: No false positives from non-Copilot TUIs`
+- TO: `### Requirement: No false positives from non-agent TUIs`
+
 ## MODIFIED Requirements
 
 ### Requirement: Detect DEAD
