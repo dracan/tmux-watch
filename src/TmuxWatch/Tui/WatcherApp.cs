@@ -267,7 +267,6 @@ public sealed class WatcherApp
         table.Title = new TableTitle(title);
         table.AddColumn("#");
         table.AddColumn("State");
-        table.AddColumn("Agent");
         table.AddColumn("Window");
         // Path and Loc are wide-only columns, hidden by default so the table
         // fits a thin terminal split.
@@ -293,12 +292,10 @@ public sealed class WatcherApp
             if (focused)
                 numCell = $"[green]►[/]{numCell}";
 
-            var agent = string.IsNullOrWhiteSpace(p.Pane.AgentId) ? "—" : p.Pane.AgentId;
             var cells = new List<string>
             {
                 numCell,
                 StateMarkup(p.State, p.AttentionOutstanding),
-                Markup.Escape(agent),
                 windowCell,
             };
             if (wideMode)
