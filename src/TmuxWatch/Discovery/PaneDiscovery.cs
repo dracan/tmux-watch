@@ -10,7 +10,7 @@ public sealed record DiscoveryResult(IReadOnlyList<Pane> Panes, string? Error)
 
 /// <summary>
 /// Enumerates panes via a single read-only <c>lsp -a -F</c> call, parses them,
-/// and filters to Copilot sessions (foreground command, with an optional
+/// and matches each to an agent profile (foreground command, with an optional
 /// session-name backstop). Server/CLI failures yield an empty set plus an error
 /// rather than throwing.
 /// </summary>
@@ -21,12 +21,12 @@ public sealed class PaneDiscovery
         "#{pane_id}|#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_dead}|#{window_name}|#{pane_current_path}|#{window_active}|#{pane_active}";
 
     private readonly ITmuxClient _tmux;
-    private readonly WatchConfig _cfg;
+    private readonly IReadOnlyList<AgentProfile> _agents;
 
     public PaneDiscovery(ITmuxClient tmux, WatchConfig cfg)
     {
         _tmux = tmux;
-        _cfg = cfg;
+        _agents = cfg.ResolveAgents();
     }
 
     /// <summary>All panes across all sessions (unfiltered).</summary>
@@ -48,41 +48,42 @@ public sealed class PaneDiscovery
         return new DiscoveryResult(panes, null);
     }
 
-    /// <summary>Only the panes that are Copilot sessions.</summary>
-    public DiscoveryResult DiscoverCopilotPanes()
+    /// <summary>
+    /// Only the panes that match an agent profile, each stamped with its matched
+    /// agent id (<see cref="Pane.AgentId"/>).
+    /// </summary>
+    public DiscoveryResult DiscoverAgentPanes()
     {
         var all = EnumerateAll();
         if (!all.Ok)
             return all;
 
-        var convention = _cfg.CompileSessionConvention();
-        var copilot = all.Panes.Where(p => IsCopilot(p, convention)).ToList();
-        return new DiscoveryResult(copilot, null);
-    }
-
-    public bool IsCopilot(Pane pane, System.Text.RegularExpressions.Regex? convention)
-    {
-        if (CommandIsCopilot(pane.Command))
-            return true;
-        if (convention is not null && convention.IsMatch(pane.SessionName))
-            return true;
-        return false;
+        var matched = new List<Pane>();
+        foreach (var pane in all.Panes)
+        {
+            if (MatchProfile(pane) is { } profile)
+                matched.Add(pane with { AgentId = profile.Id });
+        }
+        return new DiscoveryResult(matched, null);
     }
 
     /// <summary>
-    /// Matches the foreground command against the configured Copilot command.
-    /// A Windows/psmux host reports <c>pane_current_command</c> with the executable
-    /// extension (e.g. "copilot.exe"), so we also compare the extensionless stem
-    /// to keep the configured command ("copilot") working on every platform.
+    /// The first agent profile this pane belongs to, or null if none. Command match
+    /// is tried across all profiles first (cheap, from enumeration), then the
+    /// session-name backstop, so a correctly-named pane still matches even when its
+    /// foreground command is momentarily something else.
     /// </summary>
-    public bool CommandIsCopilot(string command)
+    public AgentProfile? MatchProfile(Pane pane)
     {
-        if (string.Equals(command, _cfg.CopilotCommand, StringComparison.OrdinalIgnoreCase))
-            return true;
+        foreach (var agent in _agents)
+            if (agent.MatchesCommand(pane.Command))
+                return agent;
 
-        var stem = Path.GetFileNameWithoutExtension(command);
-        return stem.Length > 0 &&
-            string.Equals(stem, _cfg.CopilotCommand, StringComparison.OrdinalIgnoreCase);
+        foreach (var agent in _agents)
+            if (agent.MatchesSession(pane.SessionName))
+                return agent;
+
+        return null;
     }
 
     public static Pane? Parse(string line)

@@ -5,35 +5,38 @@ namespace TmuxWatch.Detection;
 
 /// <summary>
 /// Pure classifier: turns a captured pane screen into a <see cref="PaneState"/>
-/// using positive status-bar fingerprints. Applies a fixed precedence
-/// (WAITING → WORKING → IDLE → DEAD) so a screen matching more than one signal
-/// resolves predictably. Holds no state, so it is trivially fixture-testable.
+/// using one <see cref="AgentProfile"/>'s positive status-bar fingerprints. Applies
+/// a fixed precedence (WAITING → WORKING → IDLE → DEAD) so a screen matching more
+/// than one signal resolves predictably. Holds no mutable state, so it is trivially
+/// fixture-testable. The caller selects the profile for a pane during discovery.
 /// </summary>
 public sealed class PaneClassifier
 {
-    private readonly WatchConfig _cfg;
+    private readonly AgentProfile _profile;
+    private readonly int _statusLineCount;
     private readonly Regex _waitingCursor;
-    private readonly Regex _workingSpinner;
+    private readonly Regex? _workingSpinner;
     private readonly Regex _spinnerGlyph;
 
-    public PaneClassifier(WatchConfig cfg)
+    public PaneClassifier(AgentProfile profile, int statusLineCount = 6)
     {
-        _cfg = cfg;
-        _waitingCursor = cfg.CompileWaitingCursor();
-        _workingSpinner = cfg.CompileWorkingSpinner();
-        _spinnerGlyph = cfg.CompileSpinnerGlyph();
+        _profile = profile;
+        _statusLineCount = statusLineCount;
+        _waitingCursor = profile.CompileWaitingCursor();
+        _workingSpinner = profile.CompileWorkingSpinner();
+        _spinnerGlyph = profile.CompileSpinnerGlyph();
     }
 
     /// <summary>
-    /// Classify from a capture and liveness facts. <paramref name="commandIsCopilot"/>
-    /// and <paramref name="dead"/> come from pane enumeration.
+    /// Classify from a capture and the pane's dead flag. The pane is already known
+    /// to belong to this profile's agent (matched during discovery).
     /// </summary>
-    public PaneState Classify(string? capture, bool commandIsCopilot, bool dead)
+    public PaneState Classify(string? capture, bool dead)
     {
-        if (dead || !commandIsCopilot)
+        if (dead)
             return PaneState.Dead;
 
-        var statusLines = TailNonBlank(capture, _cfg.StatusLineCount);
+        var statusLines = TailNonBlank(capture, _statusLineCount);
         var statusText = string.Join("\n", statusLines);
 
         if (IsWaiting(statusText))
@@ -56,8 +59,8 @@ public sealed class PaneClassifier
         // do not match a stray "esc to cancel" appearing elsewhere.
         foreach (var line in statusText.Split('\n'))
         {
-            if (line.Contains(_cfg.WaitingFooterNavMarker, StringComparison.Ordinal) &&
-                line.Contains(_cfg.WaitingFooterCancelMarker, StringComparison.Ordinal))
+            if (line.Contains(_profile.WaitingFooterNavMarker, StringComparison.Ordinal) &&
+                line.Contains(_profile.WaitingFooterCancelMarker, StringComparison.Ordinal))
                 return true;
         }
 
@@ -66,19 +69,19 @@ public sealed class PaneClassifier
 
     private bool IsWorking(string statusText)
     {
-        // Legacy: spinner glyph immediately followed by the word "Working".
-        if (_workingSpinner.IsMatch(statusText))
+        // Legacy/Copilot: spinner glyph immediately followed by the word "Working".
+        if (_workingSpinner is not null && _workingSpinner.IsMatch(statusText))
             return true;
 
-        // Current CLI: the footer shows a spinner glyph followed by the active
-        // action label (e.g. "Adding contracts") and the working cancel marker,
-        // with no "Working" word. Require both on one line so stale text elsewhere
-        // does not match. "esc cancel" is distinct from the selection footer's
-        // "esc to cancel", and WAITING is checked first, so there is no overlap.
+        // Footer shows the working cancel marker. Copilot pairs it with a spinner
+        // glyph on the same line; Claude's marker ("esc to interrupt") is distinctive
+        // enough to stand alone (WorkingMarkerSufficient). WAITING is checked first,
+        // so a selection footer never reaches here.
         foreach (var line in statusText.Split('\n'))
         {
-            if (_spinnerGlyph.IsMatch(line) &&
-                line.Contains(_cfg.WorkingFooterCancelMarker, StringComparison.Ordinal))
+            if (!line.Contains(_profile.WorkingFooterCancelMarker, StringComparison.Ordinal))
+                continue;
+            if (_profile.WorkingMarkerSufficient || _spinnerGlyph.IsMatch(line))
                 return true;
         }
 
@@ -86,7 +89,7 @@ public sealed class PaneClassifier
     }
 
     private bool IsIdle(string statusText) =>
-        _cfg.IdleHints.Any(hint => statusText.Contains(hint, StringComparison.Ordinal));
+        _profile.IdleHints.Any(hint => statusText.Contains(hint, StringComparison.Ordinal));
 
     private static List<string> TailNonBlank(string? capture, int count)
     {

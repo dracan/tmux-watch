@@ -1,22 +1,29 @@
 # tmux-watch
 
-A read-only watcher that tells you which **GitHub Copilot CLI** sessions running
-inside **tmux** panes need your attention - and lets you jump straight to them.
+A read-only watcher that tells you which **coding-agent** sessions - **GitHub
+Copilot CLI** and **Claude Code** - running inside **tmux** panes need your
+attention, and lets you jump straight to them.
 
-When you run several Copilot sessions across tmux panes, it is easy to lose track
-of which ones have stopped and are blocked waiting for you (a command-approval
-prompt or an `ask_user` question). `tmux-watch` polls the panes read-only,
-classifies each one, and surfaces the ones that need you.
+When you run several agent sessions across tmux panes, it is easy to lose track
+of which ones have stopped and are blocked waiting for you (a command/permission
+prompt or a question). `tmux-watch` polls the panes read-only, classifies each
+one against its agent's profile, and surfaces the ones that need you.
+
+Agents are pluggable **profiles** (how to recognise the agent's panes and the
+status-bar tokens that mark each state). Copilot and Claude Code ship built in;
+a new agent is a config change, not a code change.
 
 ## How it works
 
 Each poll:
 
 1. Enumerates panes once via `tmux lsp -a -F …` (read-only).
-2. Filters to Copilot sessions (`pane_current_command == copilot`, with an optional
-   session-name backstop).
-3. Captures each Copilot pane with `capture-pane -p` (read-only) and classifies it
-   from its status bar:
+2. Matches each pane to an agent profile by foreground command
+   (`copilot` / `claude`), with an optional session-name backstop.
+3. Captures each matched pane with `capture-pane -p` (read-only) and classifies it
+   from its status bar using that agent's tokens (Copilot shown below; Claude Code
+   uses its own - numbered `❯ N.` permission cursor, `esc to interrupt` while
+   working, and the input-box mode line when idle):
 
    | State | Signal at the bottom of the pane |
    |-------|----------------------------------|
@@ -88,29 +95,51 @@ state is per-run and is not persisted across restarts.
 
 ## Configuration
 
-All detection tokens and behaviour are configurable so a Copilot version bump is a
-config change, not a code change. Pass `--config config.json`:
+Behaviour and all per-agent detection tokens are configurable, so an agent
+version bump is a config change, not a code change. When no `agents` list is
+given, the built-in `copilot` and `claude` profiles are used. Pass
+`--config config.json` to override:
 
 ```json
 {
   "tmuxExecutable": "tmux",
   "pollIntervalSeconds": 2.0,
-  "copilotCommand": "copilot",
-  "sessionNameConvention": "^cop-",
   "notifyOnIdle": false,
   "notificationChannel": "bell",
-  "waitingCursorPattern": "❯\\s*\\d+\\.",
-  "waitingFooterNavMarker": "↑/↓",
-  "waitingFooterCancelMarker": "esc to cancel",
-  "workingSpinnerGlyphs": "◎◉●○",
-  "workingWord": "Working",
-  "workingFooterCancelMarker": "esc cancel",
-  "idleHints": ["/ commands", "? help", "space hold to record"]
+  "statusLineCount": 6,
+  "agents": [
+    {
+      "id": "copilot",
+      "command": "copilot",
+      "sessionNameConvention": "^cop-",
+      "waitingCursorPattern": "❯\\s*\\d+\\.",
+      "waitingFooterNavMarker": "↑/↓",
+      "waitingFooterCancelMarker": "esc to cancel",
+      "workingSpinnerGlyphs": "◎◉●○",
+      "workingWord": "Working",
+      "workingFooterCancelMarker": "esc cancel",
+      "idleHints": ["/ commands", "? help", "space hold to record"]
+    },
+    {
+      "id": "claude",
+      "command": "claude",
+      "workingSpinnerGlyphs": "✻✽✶✷✸✹✺",
+      "workingWord": "",
+      "workingFooterCancelMarker": "esc to interrupt",
+      "workingMarkerSufficient": true,
+      "idleHints": ["shift+tab to cycle", "? for shortcuts"]
+    }
+  ]
 }
 ```
 
 Set `tmuxExecutable` to `psmux` (or another tmux-compatible CLI) to run against a
 different multiplexer host.
+
+> **Claude Code tokens are provisional.** The `claude` IDLE token was verified
+> against a live pane; the WORKING/WAITING tokens are best-effort. If a Claude
+> Code build changes its status bar, run `--calibrate` against a live pane and
+> override the affected tokens in the `claude` profile above.
 
 ## Tests
 
@@ -118,9 +147,11 @@ different multiplexer host.
 dotnet test
 ```
 
-The classifier is pure and tested against **real captured pane fixtures**
-(`tests/TmuxWatch.Tests/fixtures/`): command-approval WAITING, `ask_user` WAITING,
-WORKING, IDLE, and a lazygit control (must not be flagged).
+The classifier is pure and tested against **pane fixtures**
+(`tests/TmuxWatch.Tests/fixtures/`): Copilot command-approval WAITING, `ask_user`
+WAITING, WORKING, IDLE, a lazygit control (must not be flagged), and Claude Code
+WAITING/WORKING/IDLE. The Copilot fixtures are real captures (scrubbed of content);
+the Claude fixtures are synthetic shells built around the real status-bar tokens.
 
 ## Topology note
 

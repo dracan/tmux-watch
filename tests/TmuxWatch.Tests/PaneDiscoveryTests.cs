@@ -1,6 +1,5 @@
 using TmuxWatch.Config;
 using TmuxWatch.Discovery;
-using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tests;
 
@@ -48,7 +47,7 @@ public class PaneDiscoveryTests
     [Fact]
     public void Parse_detects_dead_flag()
     {
-        var pane = PaneDiscovery.Parse("%5|work|0|1|pwsh|1");
+        var pane = PaneDiscovery.Parse("%5|work|0|1|bash|1");
         Assert.True(pane!.Dead);
     }
 
@@ -56,48 +55,96 @@ public class PaneDiscoveryTests
     public void Parse_ignores_blank_lines() => Assert.Null(PaneDiscovery.Parse("   "));
 
     [Fact]
-    public void Filters_to_copilot_by_command()
+    public void Matches_copilot_by_command()
     {
         var fake = new FakeTmuxClient
         {
-            ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|lazygit|0\n%3|s|0|2|pwsh|0",
+            ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|lazygit|0\n%3|s|0|2|bash|0",
         };
         var discovery = new PaneDiscovery(fake, new WatchConfig());
 
-        var copilot = discovery.DiscoverCopilotPanes();
+        var agents = discovery.DiscoverAgentPanes();
 
-        Assert.True(copilot.Ok);
-        Assert.Single(copilot.Panes);
-        Assert.Equal("%1", copilot.Panes[0].Id);
+        Assert.True(agents.Ok);
+        Assert.Single(agents.Panes);
+        Assert.Equal("%1", agents.Panes[0].Id);
+        Assert.Equal("copilot", agents.Panes[0].AgentId);
     }
 
     [Fact]
-    public void Filters_to_copilot_when_command_has_exe_extension()
+    public void Matches_claude_by_command()
     {
-        // Windows tmux reports the foreground command as "copilot.exe".
+        // tmux reports `pane_current_command` as `claude` for a Claude Code pane.
+        var fake = new FakeTmuxClient { ListOutput = "%7|s|0|0|claude|0" };
+        var discovery = new PaneDiscovery(fake, new WatchConfig());
+
+        var agents = discovery.DiscoverAgentPanes();
+
+        Assert.Single(agents.Panes);
+        Assert.Equal("claude", agents.Panes[0].AgentId);
+    }
+
+    [Fact]
+    public void Matches_both_agents_in_one_server()
+    {
+        var fake = new FakeTmuxClient
+        {
+            ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|claude|0\n%3|s|0|2|vim|0",
+        };
+        var discovery = new PaneDiscovery(fake, new WatchConfig());
+
+        var agents = discovery.DiscoverAgentPanes();
+
+        Assert.Equal(2, agents.Panes.Count);
+        Assert.Equal(new[] { "copilot", "claude" }, agents.Panes.Select(p => p.AgentId));
+    }
+
+    [Fact]
+    public void Matches_copilot_when_command_has_exe_extension()
+    {
+        // A Windows/psmux host reports the foreground command as "copilot.exe".
         var fake = new FakeTmuxClient
         {
             ListOutput = "%1|s|0|0|copilot.exe|0\n%2|s|0|1|cmd|0\n%3|s|0|2|pwsh|0",
         };
         var discovery = new PaneDiscovery(fake, new WatchConfig());
 
-        var copilot = discovery.DiscoverCopilotPanes();
+        var agents = discovery.DiscoverAgentPanes();
 
-        Assert.True(copilot.Ok);
-        Assert.Single(copilot.Panes);
-        Assert.Equal("%1", copilot.Panes[0].Id);
+        Assert.Single(agents.Panes);
+        Assert.Equal("%1", agents.Panes[0].Id);
     }
 
     [Fact]
     public void Session_name_convention_is_a_backstop()
     {
+        // A node-hosted pane named by convention still matches, even though its
+        // foreground command is not the agent's command.
         var fake = new FakeTmuxClient { ListOutput = "%9|cop-experiment|0|0|node|0" };
-        var cfg = new WatchConfig { SessionNameConvention = "^cop-" };
+        var cfg = new WatchConfig
+        {
+            Agents = new()
+            {
+                new AgentProfile { Id = "copilot", Command = "copilot", SessionNameConvention = "^cop-" },
+            },
+        };
         var discovery = new PaneDiscovery(fake, cfg);
 
-        var copilot = discovery.DiscoverCopilotPanes();
+        var agents = discovery.DiscoverAgentPanes();
 
-        Assert.Single(copilot.Panes);
+        Assert.Single(agents.Panes);
+        Assert.Equal("copilot", agents.Panes[0].AgentId);
+    }
+
+    [Fact]
+    public void Non_agent_panes_are_excluded()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|bash|0\n%2|s|0|1|vim|0" };
+        var discovery = new PaneDiscovery(fake, new WatchConfig());
+
+        var agents = discovery.DiscoverAgentPanes();
+
+        Assert.Empty(agents.Panes);
     }
 
     [Fact]

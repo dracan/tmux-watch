@@ -8,7 +8,7 @@ using TmuxWatch.Tmux;
 namespace TmuxWatch.Tui;
 
 /// <summary>
-/// Live Spectre.Console view of watched Copilot panes. WAITING panes are sorted
+/// Live Spectre.Console view of watched agent panes. WAITING panes are sorted
 /// to the top. Number keys switch the terminal client's focus to a pane via the
 /// read-only-safe client-control verbs; the TUI never sends input to a pane.
 /// Pressing <c>p</c> pauses the focused pane, moving it to a separate "Paused"
@@ -213,12 +213,12 @@ public sealed class WatcherApp
             number[p.Pane.Id] = n++;
 
         var main = BuildPaneTable(
-            "tmux-watch — Copilot panes  (number = switch · ► = focused · p = pause/resume · w = wide · q = quit)",
+            "tmux-watch — agent panes  (number = switch · ► = focused · p = pause/resume · w = wide · q = quit)",
             active, number, now, _wideMode);
 
         if (all.Count == 0)
             main.Caption = new TableTitle(error is null
-                ? "No Copilot panes found."
+                ? "No agent panes found."
                 : $"[red]{Markup.Escape(error)}[/]");
         else if (error is not null)
             main.Caption = new TableTitle($"[red]tmux error: {Markup.Escape(error)}[/]");
@@ -248,6 +248,7 @@ public sealed class WatcherApp
         table.Title = new TableTitle(title);
         table.AddColumn("#");
         table.AddColumn("State");
+        table.AddColumn("Agent");
         table.AddColumn("Window");
         // Path and Loc are wide-only columns, hidden by default so the table
         // fits a thin terminal split.
@@ -273,10 +274,12 @@ public sealed class WatcherApp
             if (focused)
                 numCell = $"[green]►[/]{numCell}";
 
+            var agent = string.IsNullOrWhiteSpace(p.Pane.AgentId) ? "—" : p.Pane.AgentId;
             var cells = new List<string>
             {
                 numCell,
                 StateMarkup(p.State, p.AttentionOutstanding),
+                Markup.Escape(agent),
                 windowCell,
             };
             if (wideMode)

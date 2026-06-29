@@ -20,13 +20,12 @@ if (options.NotifyIdle) cfg.NotifyOnIdle = true;
 
 var tmux = new TmuxRunner(cfg.TmuxExecutable);
 var discovery = new PaneDiscovery(tmux, cfg);
-var classifier = new PaneClassifier(cfg);
 
 if (options.Calibrate)
-    return Calibrate(tmux, discovery, classifier, cfg);
+    return Calibrate(tmux, discovery, cfg);
 
 var notifier = NotifierFactory.Create(cfg);
-var monitor = new AttentionMonitor(discovery, classifier, tmux, cfg, notifier);
+var monitor = new AttentionMonitor(discovery, tmux, cfg, notifier);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -46,14 +45,14 @@ static void PrintOnce(MonitorSnapshot snap)
     if (snap.Error is not null)
         AnsiConsole.MarkupLine($"[red]{Markup.Escape(snap.Error)}[/]");
     foreach (var p in snap.Panes.OrderBy(p => p.State))
-        AnsiConsole.MarkupLine($"{(p.Pane.IsFocused ? "[green]►[/]" : " ")} {Markup.Escape(p.Pane.Location)}\t{Markup.Escape(p.Pane.DisplayName)}\t{p.State}\t{Markup.Escape(p.Pane.Command)}");
+        AnsiConsole.MarkupLine($"{(p.Pane.IsFocused ? "[green]►[/]" : " ")} {Markup.Escape(p.Pane.Location)}\t{Markup.Escape(p.Pane.AgentId)}\t{Markup.Escape(p.Pane.DisplayName)}\t{p.State}\t{Markup.Escape(p.Pane.Command)}");
     if (snap.Panes.Count == 0 && snap.Error is null)
-        AnsiConsole.MarkupLine("[grey]No Copilot panes found.[/]");
+        AnsiConsole.MarkupLine("[grey]No agent panes found.[/]");
 }
 
 // Self-test: classify every live pane and show the status tail, so tokens can be
-// re-derived after a Copilot CLI upgrade.
-static int Calibrate(TmuxRunner tmux, PaneDiscovery discovery, PaneClassifier classifier, WatchConfig cfg)
+// re-derived after an agent CLI upgrade.
+static int Calibrate(TmuxRunner tmux, PaneDiscovery discovery, WatchConfig cfg)
 {
     var all = discovery.EnumerateAll();
     if (!all.Ok)
@@ -62,20 +61,22 @@ static int Calibrate(TmuxRunner tmux, PaneDiscovery discovery, PaneClassifier cl
         return 1;
     }
 
-    var convention = cfg.CompileSessionConvention();
+    var classifiers = cfg.ResolveAgents()
+        .ToDictionary(a => a.Id, a => new PaneClassifier(a, cfg.StatusLineCount));
+
     var table = new Table().Border(TableBorder.Rounded);
     table.AddColumn("Pane");
     table.AddColumn("Command");
-    table.AddColumn("Copilot?");
+    table.AddColumn("Agent");
     table.AddColumn("State");
     table.AddColumn("Status tail");
 
     foreach (var pane in all.Panes)
     {
-        var isCop = discovery.IsCopilot(pane, convention);
+        var profile = discovery.MatchProfile(pane);
         var cap = tmux.CapturePane(pane.Id);
-        var state = isCop
-            ? classifier.Classify(cap.Ok ? cap.StdOut : null, true, pane.Dead)
+        var state = profile is not null && classifiers.TryGetValue(profile.Id, out var classifier)
+            ? classifier.Classify(cap.Ok ? cap.StdOut : null, pane.Dead)
             : PaneState.Dead;
 
         var tail = cap.Ok
@@ -87,7 +88,7 @@ static int Calibrate(TmuxRunner tmux, PaneDiscovery discovery, PaneClassifier cl
         table.AddRow(
             Markup.Escape(pane.Location),
             Markup.Escape(pane.Command),
-            isCop ? "[green]yes[/]" : "[grey]no[/]",
+            profile is null ? "[grey]—[/]" : $"[green]{Markup.Escape(profile.Id)}[/]",
             Markup.Escape(state.ToString()),
             Markup.Escape(tail));
     }
@@ -129,10 +130,10 @@ sealed class CliOptions
 
     public static void PrintHelp()
     {
-        AnsiConsole.WriteLine("tmux-watch - surface which Copilot panes need attention");
+        AnsiConsole.WriteLine("tmux-watch - surface which agent panes (Copilot, Claude Code) need attention");
         AnsiConsole.WriteLine();
         AnsiConsole.WriteLine("Usage: tmux-watch [options]");
-        AnsiConsole.WriteLine("  --config <path>     Load JSON config (tokens, interval, notifications)");
+        AnsiConsole.WriteLine("  --config <path>     Load JSON config (agents, interval, notifications)");
         AnsiConsole.WriteLine("  --interval <sec>    Poll interval override");
         AnsiConsole.WriteLine("  --notify-idle       Also notify when a pane goes idle");
         AnsiConsole.WriteLine("  --calibrate         Print classification of all live panes and exit");

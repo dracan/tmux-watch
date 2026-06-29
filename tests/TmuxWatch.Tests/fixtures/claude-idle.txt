@@ -1,0 +1,7 @@
+● Synthetic fixture - a Claude Code pane at the input box, idle (no real content).
+
+                                                          new task? /clear to save 12.3k tokens
+──────────────────────────────────────────────────────────────────────────── todo: ideas ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

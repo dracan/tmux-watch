@@ -24,8 +24,7 @@ public class AttentionMonitorTests
         cfg ??= new WatchConfig();
         clock = new FakeClock(DateTimeOffset.UnixEpoch);
         var discovery = new PaneDiscovery(fake, cfg);
-        var classifier = new PaneClassifier(cfg);
-        return new AttentionMonitor(discovery, classifier, fake, cfg, new NullNotifier(), clock);
+        return new AttentionMonitor(discovery, fake, cfg, new NullNotifier(), clock);
     }
 
     [Fact]

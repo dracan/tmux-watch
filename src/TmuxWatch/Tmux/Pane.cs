@@ -14,8 +14,12 @@ public sealed record Pane(
     string WindowName = "",
     string CurrentPath = "",
     bool WindowActive = false,
-    bool PaneActive = false)
+    bool PaneActive = false,
+    string AgentId = "")
 {
+    // AgentId is empty as parsed from tmux; discovery stamps it with the id of the
+    // matched agent profile (e.g. "copilot", "claude").
+
     /// <summary>Target usable with tmux -t for window selection, e.g. "work:1".</summary>
     public string WindowTarget => $"{SessionName}:{WindowIndex}";
 

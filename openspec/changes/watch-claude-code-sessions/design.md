@@ -13,9 +13,9 @@ Two facts shape the design:
    | WORKING spinner     | `◎◉●○`                        | Claude's spinner glyph set       |
    | IDLE hint           | `/ commands · ? help`         | `? for shortcuts`                |
 
-2. **Claude is not identifiable by foreground command.** The `claude` launcher is a Node script, so tmux reports `pane_current_command` as `node` (to be confirmed), which is too generic to match on. Claude needs a richer identity signal than Copilot does.
+2. **Claude IS identifiable by foreground command.** The spike (running `--calibrate` against the live WSL2 tmux server) found that tmux reports `pane_current_command` as **`claude`**, not `node` as originally assumed. So Claude identity is a plain command match, exactly like Copilot; the bounded `node`/content-fingerprint machinery in the original plan is unnecessary and is deferred (kept only as a future fallback for wrapped launchers).
 
-Provisional Claude tokens above are from prior knowledge of the Claude Code TUI, **not** from captures on this machine. They MUST be verified by a capture spike before the defaults are trusted - the same discipline that produced the Copilot fixtures.
+The provisional Claude tokens above are from prior knowledge of the Claude Code TUI. The spike confirmed the **IDLE** token against real panes (`shift+tab to cycle` on the input-box mode line); **WORKING** (`esc to interrupt`) and **WAITING** (numbered `❯ N.` cursor) remain best-effort until captured live, and are calibrate-overridable - the same discipline that produced the Copilot fixtures.
 
 ## Goals / Non-Goals
 
@@ -36,13 +36,12 @@ Provisional Claude tokens above are from prior knowledge of the Claude Code TUI,
 ### D1 - Lift per-agent tokens into an `AgentProfile`; `WatchConfig` holds an ordered list
 `AgentProfile` = `{ id, command?, sessionConvention?, candidateHostCommands[], waitingCursorPattern, waitingFooterNavMarker, waitingFooterCancelMarker, workingSpinnerGlyphs, workingWord, workingFooterCancelMarker, idleHints[] }`. `WatchConfig.Agents` is an ordered list; `copilot` and `claude` ship as built-in defaults. The existing flat token fields on `WatchConfig` map onto the `copilot` profile's defaults so an existing config keeps working. *Alternative considered:* a second flat block of `claude*` fields - rejected as not scaling past two agents and entangling the two token sets.
 
-### D2 - Profile matching order: command, then name convention, then bounded content fingerprint
+### D2 - Profile matching order: command, then name convention (content fingerprint deferred)
 For each enumerated pane, find the first profile where:
-1. `pane_current_command` equals the profile's `command` (extension-insensitive, as today) - free, covers Copilot; or
-2. the session or window name matches the profile's `sessionConvention` - free, opt-in discipline; or
-3. `pane_current_command` is in the profile's `candidateHostCommands` (default `["node"]` for Claude) AND a `capture-pane` of that pane matches the profile's own IDLE/WORKING/WAITING tokens - self-identifying, no discipline.
+1. `pane_current_command` equals the profile's `command` (extension-insensitive, as today) - free, covers **both** Copilot and Claude (the spike confirmed Claude reports `claude`); or
+2. the session or window name matches the profile's `sessionNameConvention` - free, opt-in backstop for a pane whose foreground command is momentarily something else.
 
-Step 3 is the only new capture cost, and it is bounded to plausible agent hosts, so a tmux full of shells/vim/lazygit is matched in step 1/2 for free and never captured. *Alternative considered:* content fingerprint for all panes - rejected because it inverts filter-then-capture into capture-everything. *Alternative considered:* name convention only - rejected as requiring discipline the user may not keep.
+Command match is tried across all profiles first, then the convention backstop. A bounded content-fingerprint step (capture only `node`-hosted panes and match by the profile's own tokens) was in the original plan as a third tier, but the spike showed it is unnecessary because Claude is identified by command; it is **deferred** as a future fallback for wrapped launchers. *Alternative considered:* content fingerprint for all panes - rejected because it inverts filter-then-capture into capture-everything.
 
 ### D3 - `PaneClassifier` is parameterised by a profile, not by `WatchConfig`
 `Classify(capture, profile, dead)` uses the profile's tokens; the precedence (WAITING -> WORKING -> IDLE -> DEAD) and the per-line invariant matching are unchanged. The classifier stays pure and fixture-testable, now per profile. The monitor selects the matched pane's profile before classifying.

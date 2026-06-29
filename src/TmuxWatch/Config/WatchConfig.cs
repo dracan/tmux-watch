@@ -1,12 +1,11 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace TmuxWatch.Config;
 
 /// <summary>
-/// All tunable behaviour and the version-specific match tokens used to classify
-/// Copilot panes. Tokens are configurable because they depend on the Copilot CLI
-/// version (verified against v1.0.63).
+/// Global watcher behaviour plus the set of <see cref="AgentProfile"/>s to watch.
+/// When <see cref="Agents"/> is unset the built-in Copilot and Claude Code profiles
+/// are used; supply <see cref="Agents"/> in config to override or extend them.
 /// </summary>
 public sealed class WatchConfig
 {
@@ -18,15 +17,6 @@ public sealed class WatchConfig
 
     public double PollIntervalSeconds { get; set; } = 2.0;
 
-    /// <summary>Foreground command that identifies a Copilot pane.</summary>
-    public string CopilotCommand { get; set; } = "copilot";
-
-    /// <summary>
-    /// Optional regex on the session name used as a backstop when the foreground
-    /// command is not (yet) the Copilot command. Empty disables the backstop.
-    /// </summary>
-    public string SessionNameConvention { get; set; } = "";
-
     /// <summary>Number of trailing non-blank lines treated as the status area.</summary>
     public int StatusLineCount { get; set; } = 6;
 
@@ -35,36 +25,56 @@ public sealed class WatchConfig
     /// <summary>Notification channel: "bell", "none" (extendable, e.g. "toast").</summary>
     public string NotificationChannel { get; set; } = "bell";
 
-    // ---- Detection tokens (version-specific, overridable) -------------------
+    /// <summary>
+    /// Agent profiles to watch. When null or empty, the built-in Copilot + Claude
+    /// Code defaults are used.
+    /// </summary>
+    public List<AgentProfile>? Agents { get; set; }
 
-    /// <summary>Numbered selection cursor, e.g. "❯ 1.".</summary>
-    public string WaitingCursorPattern { get; set; } = @"❯\s*\d+\.";
+    public IReadOnlyList<AgentProfile> ResolveAgents() =>
+        Agents is { Count: > 0 } ? Agents : DefaultAgents;
 
-    /// <summary>Up/down marker present in every selection footer.</summary>
-    public string WaitingFooterNavMarker { get; set; } = "↑/↓";
+    public static IReadOnlyList<AgentProfile> DefaultAgents { get; } = new List<AgentProfile>
+    {
+        CopilotProfile(),
+        ClaudeProfile(),
+    };
 
-    /// <summary>Cancel text common to every selection footer.</summary>
-    public string WaitingFooterCancelMarker { get; set; } = "esc to cancel";
-
-    /// <summary>Spinner glyphs that precede the "Working" word.</summary>
-    public string WorkingSpinnerGlyphs { get; set; } = "◎◉●○";
-
-    public string WorkingWord { get; set; } = "Working";
+    /// <summary>Built-in Copilot CLI profile (tokens verified against Copilot v1.0.63).</summary>
+    public static AgentProfile CopilotProfile() => new()
+    {
+        Id = "copilot",
+        Command = "copilot",
+        WaitingCursorPattern = @"❯\s*\d+\.",
+        WaitingFooterNavMarker = "↑/↓",
+        WaitingFooterCancelMarker = "esc to cancel",
+        WorkingSpinnerGlyphs = "◎◉●○",
+        WorkingWord = "Working",
+        WorkingFooterCancelMarker = "esc cancel",
+        WorkingMarkerSufficient = false,
+        IdleHints = new() { "/ commands", "? help", "space hold to record" },
+    };
 
     /// <summary>
-    /// Cancel text on the working footer. Newer Copilot builds render the spinner
-    /// followed by the current action label (e.g. "Adding contracts") instead of
-    /// the literal word "Working", so a spinner glyph plus this marker on one line
-    /// also indicates WORKING. Distinct from the selection footer's "esc to cancel".
+    /// Built-in Claude Code profile. tmux reports <c>pane_current_command</c> as
+    /// <c>claude</c>, so identity is a plain command match. The WAITING cursor is
+    /// shared with Copilot; WORKING keys on the distinctive "esc to interrupt"
+    /// marker; IDLE keys on the input-box mode line. The IDLE/WORKING tokens are
+    /// provisional - run <c>--calibrate</c> against a live Claude pane to confirm
+    /// them after a Claude Code upgrade and override here if they change.
     /// </summary>
-    public string WorkingFooterCancelMarker { get; set; } = "esc cancel";
-
-    /// <summary>Any one of these tokens in the status area indicates IDLE.</summary>
-    public List<string> IdleHints { get; set; } = new()
+    public static AgentProfile ClaudeProfile() => new()
     {
-        "/ commands",
-        "? help",
-        "space hold to record",
+        Id = "claude",
+        Command = "claude",
+        WaitingCursorPattern = @"❯\s*\d+\.",
+        WaitingFooterNavMarker = "↑/↓",
+        WaitingFooterCancelMarker = "esc to cancel",
+        WorkingSpinnerGlyphs = "✻✽✶✷✸✹✺·✢✳∗",
+        WorkingWord = "",                       // Claude shows an action label, not "Working"
+        WorkingFooterCancelMarker = "esc to interrupt",
+        WorkingMarkerSufficient = true,         // "esc to interrupt" alone is distinctive
+        IdleHints = new() { "shift+tab to cycle", "? for shortcuts" },
     };
 
     public static WatchConfig Load(string? path)
@@ -81,30 +91,4 @@ public sealed class WatchConfig
         };
         return JsonSerializer.Deserialize<WatchConfig>(json, opts) ?? new WatchConfig();
     }
-
-    // Compiled helpers ------------------------------------------------------
-
-    public Regex CompileWaitingCursor() =>
-        new(WaitingCursorPattern, RegexOptions.Compiled);
-
-    public Regex CompileWorkingSpinner()
-    {
-        var glyphs = SpinnerGlyphClass();
-        return new Regex($"{glyphs}\\s*{Regex.Escape(WorkingWord)}", RegexOptions.Compiled);
-    }
-
-    /// <summary>Matches a single spinner glyph anywhere on a line.</summary>
-    public Regex CompileSpinnerGlyph() =>
-        new(SpinnerGlyphClass(), RegexOptions.Compiled);
-
-    private string SpinnerGlyphClass()
-    {
-        var glyphs = string.Concat(WorkingSpinnerGlyphs.Select(c => Regex.Escape(c.ToString())));
-        return $"[{glyphs}]";
-    }
-
-    public Regex? CompileSessionConvention() =>
-        string.IsNullOrWhiteSpace(SessionNameConvention)
-            ? null
-            : new Regex(SessionNameConvention, RegexOptions.Compiled | RegexOptions.IgnoreCase);
 }

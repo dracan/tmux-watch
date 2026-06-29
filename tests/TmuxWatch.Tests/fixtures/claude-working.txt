@@ -1,0 +1,6 @@
+● Synthetic fixture - a Claude Code pane actively working (no real content).
+
+● Running a sample task...
+  └ doing some synthetic work
+
+✻ Forging… (12s · ↑ 1.2k tokens · esc to interrupt)
