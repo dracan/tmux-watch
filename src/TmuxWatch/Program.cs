@@ -32,7 +32,7 @@ var pointer = PointerSignalFactory.Create(cfg);
 // first tick, so a pointer left red by a prior abnormal exit self-heals on launch.
 pointer.Restore();
 
-var monitor = new AttentionMonitor(discovery, tmux, cfg, notifier, pointer: pointer);
+var monitor = new AttentionMonitor(discovery, tmux, cfg, notifier);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -47,7 +47,7 @@ if (options.Once)
     return 0;
 }
 
-new WatcherApp(monitor, tmux, cfg).Run(cts.Token);
+new WatcherApp(monitor, tmux, cfg, pointer).Run(cts.Token);
 return 0;
 
 static void PrintOnce(MonitorSnapshot snap)

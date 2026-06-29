@@ -2,7 +2,6 @@ using TmuxWatch.Config;
 using TmuxWatch.Detection;
 using TmuxWatch.Discovery;
 using TmuxWatch.Notifications;
-using TmuxWatch.Pointer;
 
 namespace TmuxWatch.Monitor;
 
@@ -26,7 +25,6 @@ public sealed class AttentionMonitor
     private readonly Tmux.ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
     private readonly INotifier _notifier;
-    private readonly IPointerSignal _pointer;
     private readonly TimeProvider _clock;
     private readonly IReadOnlyDictionary<string, PaneClassifier> _classifiers;
 
@@ -37,14 +35,12 @@ public sealed class AttentionMonitor
         Tmux.ITmuxClient tmux,
         WatchConfig cfg,
         INotifier notifier,
-        TimeProvider? clock = null,
-        IPointerSignal? pointer = null)
+        TimeProvider? clock = null)
     {
         _discovery = discovery;
         _tmux = tmux;
         _cfg = cfg;
         _notifier = notifier;
-        _pointer = pointer ?? new NullPointerSignal();
         _clock = clock ?? TimeProvider.System;
         _classifiers = cfg.ResolveAgents()
             .ToDictionary(a => a.Id, a => new PaneClassifier(a, cfg.StatusLineCount));
@@ -95,11 +91,6 @@ public sealed class AttentionMonitor
         // Drop panes that disappeared (resilience: pane vanished mid-watch).
         foreach (var goneId in _tracked.Keys.Where(k => !seen.Contains(k)).ToList())
             _tracked.Remove(goneId);
-
-        // Level-triggered pointer cue: red while any pane has outstanding attention,
-        // restored once none do. De-dup lives in the backend, so calling every tick is
-        // cheap. Independent of the edge-triggered bell above.
-        _pointer.SetWaiting(_tracked.Values.Any(t => t.AttentionOutstanding));
 
         return new MonitorSnapshot(SnapshotViews(), events, now, null);
     }

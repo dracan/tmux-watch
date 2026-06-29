@@ -21,14 +21,17 @@ through configuration. When disabled, the system SHALL never alter the OS pointe
 
 ### Requirement: Level-triggered from aggregate waiting state
 
-The system SHALL set the waiting pointer while one or more watched panes have
-outstanding attention (WAITING), and SHALL restore the normal pointer once no watched
-pane has outstanding attention. The pointer SHALL reflect the aggregate state, not any
-single pane, and SHALL change only on transitions of that aggregate.
+The system SHALL set the waiting pointer while one or more non-paused watched panes
+have outstanding attention (WAITING), and SHALL restore the normal pointer once no
+non-paused pane has outstanding attention. Paused panes (those parked into the
+secondary table) SHALL be excluded from the aggregate. The pointer SHALL reflect the
+aggregate state, not any single pane, and SHALL change only on transitions of that
+aggregate.
 
 #### Scenario: First pane enters WAITING
 
-- **WHEN** the aggregate goes from no panes waiting to at least one pane waiting
+- **WHEN** the aggregate goes from no non-paused panes waiting to at least one non-paused
+  pane waiting
 - **THEN** the system sets the waiting (red) pointer
 
 #### Scenario: Additional pane enters WAITING while already waiting
@@ -39,14 +42,21 @@ single pane, and SHALL change only on transitions of that aggregate.
 
 #### Scenario: Last waiting pane resolved
 
-- **WHEN** the last remaining waiting pane leaves WAITING so no pane has outstanding
-  attention
+- **WHEN** the last remaining non-paused waiting pane leaves WAITING so no non-paused
+  pane has outstanding attention
 - **THEN** the system restores the normal pointer
 
 #### Scenario: Waiting panes remain
 
-- **WHEN** one of several waiting panes leaves WAITING but at least one is still WAITING
+- **WHEN** one of several waiting panes leaves WAITING but at least one non-paused pane is
+  still WAITING
 - **THEN** the pointer remains the waiting colour
+
+#### Scenario: Waiting pane is paused
+
+- **WHEN** the only waiting pane is paused (parked into the secondary table)
+- **THEN** the system restores the normal pointer, and resuming the pane re-arms the
+  waiting pointer
 
 ### Requirement: Global, out-of-band pointer change
 

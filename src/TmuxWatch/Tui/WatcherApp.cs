@@ -3,6 +3,7 @@ using Spectre.Console.Rendering;
 using TmuxWatch.Config;
 using TmuxWatch.Detection;
 using TmuxWatch.Monitor;
+using TmuxWatch.Pointer;
 using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tui;
@@ -19,6 +20,7 @@ public sealed class WatcherApp
     private readonly AttentionMonitor _monitor;
     private readonly ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
+    private readonly IPointerSignal _pointer;
 
     // Pane Ids the user has parked. Tracked here (not in the monitor) because it
     // is a view-only concern, independent of a pane's classified state.
@@ -28,12 +30,25 @@ public sealed class WatcherApp
     // the table fits a thin terminal split. Toggled at runtime with the w key.
     private bool _wideMode;
 
-    public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg)
+    public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg, IPointerSignal? pointer = null)
     {
         _monitor = monitor;
         _tmux = tmux;
         _cfg = cfg;
+        _pointer = pointer ?? new NullPointerSignal();
     }
+
+    /// <summary>
+    /// True when a pane needs the user and is NOT paused. The pointer signal mirrors
+    /// this - paused panes live in the secondary table and are deliberately excluded,
+    /// so parking a waiting pane clears the cue and resuming it re-arms it.
+    /// </summary>
+    internal static bool AnyActiveWaiting(IReadOnlyList<TrackedPaneView> panes, IReadOnlySet<string> pausedIds) =>
+        panes.Any(p => p.AttentionOutstanding && !pausedIds.Contains(p.Pane.Id));
+
+    /// <summary>Drive the level-triggered pointer cue from the non-paused panes.</summary>
+    private void DrivePointer(IReadOnlyList<TrackedPaneView> all) =>
+        _pointer.SetWaiting(AnyActiveWaiting(all, _paused));
 
     public void Run(CancellationToken token)
     {
@@ -56,6 +71,7 @@ public sealed class WatcherApp
                     var all = OrderAll(snapshot.Panes, _paused);
 
                     Render(all);
+                    DrivePointer(all);
                     ctx.Refresh();
 
                     if (WaitAndHandleKeys(pollMs, all, Render, ctx, token))
@@ -86,11 +102,14 @@ public sealed class WatcherApp
                     if (key.Key == ConsoleKey.P)
                     {
                         // Park (or resume) the focused pane. Re-order so it moves
-                        // between the main and Paused tables immediately.
+                        // between the main and Paused tables immediately, and
+                        // re-evaluate the pointer cue so pausing a waiting pane
+                        // clears it (and resuming re-arms it) without waiting a tick.
                         if (ToggleFocusedPause(_paused, all))
                         {
                             all = OrderAll(all, _paused);
                             render(all);
+                            DrivePointer(all);
                             ctx.Refresh();
                         }
                     }

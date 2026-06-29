@@ -144,10 +144,14 @@ different multiplexer host.
 ### Pointer signal (opt-in)
 
 `pointerSignal` turns the real Windows mouse pointer **red across the whole
-desktop** for as long as *any* watched pane is WAITING, restoring the normal
-pointer once nothing needs you - a persistent ambient reminder that outlasts the
-one-shot bell, visible even when the terminal is minimised. It is **off by
-default**; set `enabled: true` to use it.
+desktop** for as long as any *non-paused* watched pane is WAITING, restoring the
+normal pointer once nothing needs you - a persistent ambient reminder that
+outlasts the one-shot bell, visible even when the terminal is minimised. It is
+**off by default**; set `enabled: true` to use it.
+
+- **Paused panes are excluded.** Panes you have parked (pressed `p`, moved to the
+  secondary table) do not trigger the pointer - so pausing a waiting pane clears
+  the cue and resuming it re-arms it.
 
 - **Scope is global.** Every application shows the red pointer while a pane waits.
   This is intentional - it is the whole point of the cue.
