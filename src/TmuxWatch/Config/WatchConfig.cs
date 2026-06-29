@@ -10,7 +10,11 @@ namespace TmuxWatch.Config;
 /// </summary>
 public sealed class WatchConfig
 {
-    public string PsmuxExecutable { get; set; } = "psmux";
+    /// <summary>
+    /// Multiplexer executable on PATH. Defaults to <c>tmux</c>; override to
+    /// <c>psmux</c> (or another tmux-compatible CLI) to run against a different host.
+    /// </summary>
+    public string TmuxExecutable { get; set; } = "tmux";
 
     public double PollIntervalSeconds { get; set; } = 2.0;
 

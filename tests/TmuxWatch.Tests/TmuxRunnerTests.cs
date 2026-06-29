@@ -1,8 +1,8 @@
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tests;
 
-public class PsmuxRunnerTests
+public class TmuxRunnerTests
 {
     [Theory]
     [InlineData("send-keys")]
@@ -11,7 +11,7 @@ public class PsmuxRunnerTests
     [InlineData("paste-buffer")]
     public void Forbids_input_injecting_verbs(string verb)
     {
-        var runner = new PsmuxRunner("psmux-does-not-exist");
+        var runner = new TmuxRunner("tmux-does-not-exist");
         Assert.Throws<InvalidOperationException>(() => runner.Run(verb, "-t", "%1", "hello"));
     }
 
@@ -24,7 +24,7 @@ public class PsmuxRunnerTests
     {
         // Non-existent executable => NotStarted result, but the verb guard must pass
         // (no InvalidOperationException) for whitelisted verbs.
-        var runner = new PsmuxRunner("psmux-does-not-exist-xyz");
+        var runner = new TmuxRunner("tmux-does-not-exist-xyz");
         var result = runner.Run(verb, "-t", "%1");
         Assert.False(result.Started);
     }

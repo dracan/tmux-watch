@@ -1,6 +1,6 @@
 using TmuxWatch.Config;
 using TmuxWatch.Discovery;
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tests;
 
@@ -58,7 +58,7 @@ public class PaneDiscoveryTests
     [Fact]
     public void Filters_to_copilot_by_command()
     {
-        var fake = new FakePsmuxClient
+        var fake = new FakeTmuxClient
         {
             ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|lazygit|0\n%3|s|0|2|pwsh|0",
         };
@@ -74,8 +74,8 @@ public class PaneDiscoveryTests
     [Fact]
     public void Filters_to_copilot_when_command_has_exe_extension()
     {
-        // Windows psmux reports the foreground command as "copilot.exe".
-        var fake = new FakePsmuxClient
+        // Windows tmux reports the foreground command as "copilot.exe".
+        var fake = new FakeTmuxClient
         {
             ListOutput = "%1|s|0|0|copilot.exe|0\n%2|s|0|1|cmd|0\n%3|s|0|2|pwsh|0",
         };
@@ -91,7 +91,7 @@ public class PaneDiscoveryTests
     [Fact]
     public void Session_name_convention_is_a_backstop()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%9|cop-experiment|0|0|node|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%9|cop-experiment|0|0|node|0" };
         var cfg = new WatchConfig { SessionNameConvention = "^cop-" };
         var discovery = new PaneDiscovery(fake, cfg);
 
@@ -103,13 +103,13 @@ public class PaneDiscoveryTests
     [Fact]
     public void Server_unavailable_returns_empty_with_error()
     {
-        var fake = new FakePsmuxClient { Started = false, ErrorMessage = "psmux not found" };
+        var fake = new FakeTmuxClient { Started = false, ErrorMessage = "tmux not found" };
         var discovery = new PaneDiscovery(fake, new WatchConfig());
 
         var result = discovery.EnumerateAll();
 
         Assert.False(result.Ok);
         Assert.Empty(result.Panes);
-        Assert.Contains("psmux not found", result.Error);
+        Assert.Contains("tmux not found", result.Error);
     }
 }

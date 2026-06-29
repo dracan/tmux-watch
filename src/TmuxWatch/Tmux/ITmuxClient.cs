@@ -1,10 +1,10 @@
-namespace TmuxWatch.Psmux;
+namespace TmuxWatch.Tmux;
 
-public sealed record PsmuxResult(bool Started, int ExitCode, string StdOut, string StdErr)
+public sealed record TmuxResult(bool Started, int ExitCode, string StdOut, string StdErr)
 {
     public bool Ok => Started && ExitCode == 0;
 
-    public static PsmuxResult NotStarted(string message) => new(false, -1, "", message);
+    public static TmuxResult NotStarted(string message) => new(false, -1, "", message);
 }
 
 /// <summary>
@@ -12,17 +12,17 @@ public sealed record PsmuxResult(bool Started, int ExitCode, string StdOut, stri
 /// watching and focus-switching are exposed; there is deliberately no way to send
 /// input to a watched pane.
 /// </summary>
-public interface IPsmuxClient
+public interface ITmuxClient
 {
     /// <summary>Raw output of a single <c>lsp -a -F</c> enumeration.</summary>
-    PsmuxResult ListPanesRaw(string format);
+    TmuxResult ListPanesRaw(string format);
 
     /// <summary>Read-only capture of a pane's screen (<c>capture-pane -p -t</c>).</summary>
-    PsmuxResult CapturePane(string paneId);
+    TmuxResult CapturePane(string paneId);
 
     /// <summary>Switch the attached client to a session (focus only).</summary>
-    PsmuxResult SwitchClient(string sessionName);
+    TmuxResult SwitchClient(string sessionName);
 
     /// <summary>Select a window within a session (focus only).</summary>
-    PsmuxResult SelectWindow(string windowTarget);
+    TmuxResult SelectWindow(string windowTarget);
 }

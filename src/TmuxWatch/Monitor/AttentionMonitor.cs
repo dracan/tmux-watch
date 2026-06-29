@@ -22,7 +22,7 @@ public sealed class AttentionMonitor
 {
     private readonly PaneDiscovery _discovery;
     private readonly PaneClassifier _classifier;
-    private readonly Psmux.IPsmuxClient _psmux;
+    private readonly Tmux.ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
     private readonly INotifier _notifier;
     private readonly TimeProvider _clock;
@@ -32,14 +32,14 @@ public sealed class AttentionMonitor
     public AttentionMonitor(
         PaneDiscovery discovery,
         PaneClassifier classifier,
-        Psmux.IPsmuxClient psmux,
+        Tmux.ITmuxClient tmux,
         WatchConfig cfg,
         INotifier notifier,
         TimeProvider? clock = null)
     {
         _discovery = discovery;
         _classifier = classifier;
-        _psmux = psmux;
+        _tmux = tmux;
         _cfg = cfg;
         _notifier = notifier;
         _clock = clock ?? TimeProvider.System;
@@ -64,7 +64,7 @@ public sealed class AttentionMonitor
 
             // capture is read-only; a failed capture leaves classification to
             // liveness facts (e.g. Unknown), never crashes the loop.
-            var capture = _psmux.CapturePane(pane.Id);
+            var capture = _tmux.CapturePane(pane.Id);
             var commandIsCopilot = _discovery.CommandIsCopilot(pane.Command);
             var state = _classifier.Classify(
                 capture.Ok ? capture.StdOut : null, commandIsCopilot, pane.Dead);

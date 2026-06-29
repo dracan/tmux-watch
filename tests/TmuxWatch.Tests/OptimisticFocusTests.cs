@@ -1,6 +1,6 @@
 using TmuxWatch.Detection;
 using TmuxWatch.Monitor;
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 using TmuxWatch.Tui;
 
 namespace TmuxWatch.Tests;

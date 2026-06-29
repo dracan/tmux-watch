@@ -1,7 +1,7 @@
-namespace TmuxWatch.Psmux;
+namespace TmuxWatch.Tmux;
 
 /// <summary>
-/// A single psmux pane as reported by <c>lsp -a -F</c>. <see cref="Id"/> (e.g. "%10")
+/// A single tmux pane as reported by <c>lsp -a -F</c>. <see cref="Id"/> (e.g. "%10")
 /// is the stable key used across polls.
 /// </summary>
 public sealed record Pane(
@@ -16,7 +16,7 @@ public sealed record Pane(
     bool WindowActive = false,
     bool PaneActive = false)
 {
-    /// <summary>Target usable with psmux -t for window selection, e.g. "work:1".</summary>
+    /// <summary>Target usable with tmux -t for window selection, e.g. "work:1".</summary>
     public string WindowTarget => $"{SessionName}:{WindowIndex}";
 
     public string Location => $"{SessionName}:{WindowIndex}.{PaneIndex}";
@@ -31,8 +31,11 @@ public sealed record Pane(
         {
             if (string.IsNullOrWhiteSpace(CurrentPath))
                 return "";
-            var trimmed = CurrentPath.Replace('/', '\\').TrimEnd('\\');
-            var idx = trimmed.LastIndexOf('\\');
+            // Separator-agnostic: tmux on Linux reports POSIX paths ("/home/dan/foo"),
+            // while a psmux/Windows host may report "\"-separated paths. Take the last
+            // segment regardless of which separator the host uses.
+            var trimmed = CurrentPath.TrimEnd('/', '\\');
+            var idx = trimmed.LastIndexOfAny(new[] { '/', '\\' });
             return idx >= 0 && idx < trimmed.Length - 1 ? trimmed[(idx + 1)..] : trimmed;
         }
     }

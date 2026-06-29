@@ -1,5 +1,5 @@
 using TmuxWatch.Detection;
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Monitor;
 

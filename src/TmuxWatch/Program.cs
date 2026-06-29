@@ -4,7 +4,7 @@ using TmuxWatch.Detection;
 using TmuxWatch.Discovery;
 using TmuxWatch.Monitor;
 using TmuxWatch.Notifications;
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 using TmuxWatch.Tui;
 
 var options = CliOptions.Parse(args);
@@ -18,15 +18,15 @@ var cfg = WatchConfig.Load(options.ConfigPath);
 if (options.IntervalSeconds is { } iv) cfg.PollIntervalSeconds = iv;
 if (options.NotifyIdle) cfg.NotifyOnIdle = true;
 
-var psmux = new PsmuxRunner(cfg.PsmuxExecutable);
-var discovery = new PaneDiscovery(psmux, cfg);
+var tmux = new TmuxRunner(cfg.TmuxExecutable);
+var discovery = new PaneDiscovery(tmux, cfg);
 var classifier = new PaneClassifier(cfg);
 
 if (options.Calibrate)
-    return Calibrate(psmux, discovery, classifier, cfg);
+    return Calibrate(tmux, discovery, classifier, cfg);
 
 var notifier = NotifierFactory.Create(cfg);
-var monitor = new AttentionMonitor(discovery, classifier, psmux, cfg, notifier);
+var monitor = new AttentionMonitor(discovery, classifier, tmux, cfg, notifier);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -38,7 +38,7 @@ if (options.Once)
     return 0;
 }
 
-new WatcherApp(monitor, psmux, cfg).Run(cts.Token);
+new WatcherApp(monitor, tmux, cfg).Run(cts.Token);
 return 0;
 
 static void PrintOnce(MonitorSnapshot snap)
@@ -53,12 +53,12 @@ static void PrintOnce(MonitorSnapshot snap)
 
 // Self-test: classify every live pane and show the status tail, so tokens can be
 // re-derived after a Copilot CLI upgrade.
-static int Calibrate(PsmuxRunner psmux, PaneDiscovery discovery, PaneClassifier classifier, WatchConfig cfg)
+static int Calibrate(TmuxRunner tmux, PaneDiscovery discovery, PaneClassifier classifier, WatchConfig cfg)
 {
     var all = discovery.EnumerateAll();
     if (!all.Ok)
     {
-        AnsiConsole.MarkupLine($"[red]{Markup.Escape(all.Error ?? "psmux error")}[/]");
+        AnsiConsole.MarkupLine($"[red]{Markup.Escape(all.Error ?? "tmux error")}[/]");
         return 1;
     }
 
@@ -73,7 +73,7 @@ static int Calibrate(PsmuxRunner psmux, PaneDiscovery discovery, PaneClassifier 
     foreach (var pane in all.Panes)
     {
         var isCop = discovery.IsCopilot(pane, convention);
-        var cap = psmux.CapturePane(pane.Id);
+        var cap = tmux.CapturePane(pane.Id);
         var state = isCop
             ? classifier.Classify(cap.Ok ? cap.StdOut : null, true, pane.Dead)
             : PaneState.Dead;

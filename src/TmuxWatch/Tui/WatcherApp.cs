@@ -3,7 +3,7 @@ using Spectre.Console.Rendering;
 using TmuxWatch.Config;
 using TmuxWatch.Detection;
 using TmuxWatch.Monitor;
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tui;
 
@@ -17,7 +17,7 @@ namespace TmuxWatch.Tui;
 public sealed class WatcherApp
 {
     private readonly AttentionMonitor _monitor;
-    private readonly IPsmuxClient _psmux;
+    private readonly ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
 
     // Pane Ids the user has parked. Tracked here (not in the monitor) because it
@@ -28,10 +28,10 @@ public sealed class WatcherApp
     // the table fits a thin terminal split. Toggled at runtime with the w key.
     private bool _wideMode;
 
-    public WatcherApp(AttentionMonitor monitor, IPsmuxClient psmux, WatchConfig cfg)
+    public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg)
     {
         _monitor = monitor;
-        _psmux = psmux;
+        _tmux = tmux;
         _cfg = cfg;
     }
 
@@ -149,7 +149,7 @@ public sealed class WatcherApp
     /// <summary>
     /// Marks <paramref name="target"/> as the focused pane in its session and
     /// clears focus from the other panes of that session, so exactly one row shows
-    /// the marker until the next poll reconciles with psmux.
+    /// the marker until the next poll reconciles with tmux.
     /// </summary>
     internal static void ApplyOptimisticFocus(List<TrackedPaneView> ordered, Pane target)
     {
@@ -172,8 +172,8 @@ public sealed class WatcherApp
     private void SwitchTo(Pane pane)
     {
         // Focus-only: switch session then select the window. Never sends input.
-        _psmux.SwitchClient(pane.SessionName);
-        _psmux.SelectWindow(pane.WindowTarget);
+        _tmux.SwitchClient(pane.SessionName);
+        _tmux.SelectWindow(pane.WindowTarget);
     }
 
     /// <summary>
@@ -221,7 +221,7 @@ public sealed class WatcherApp
                 ? "No Copilot panes found."
                 : $"[red]{Markup.Escape(error)}[/]");
         else if (error is not null)
-            main.Caption = new TableTitle($"[red]psmux error: {Markup.Escape(error)}[/]");
+            main.Caption = new TableTitle($"[red]tmux error: {Markup.Escape(error)}[/]");
 
         if (paused.Count == 0)
             return main;

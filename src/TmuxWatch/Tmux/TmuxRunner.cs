@@ -2,14 +2,14 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
-namespace TmuxWatch.Psmux;
+namespace TmuxWatch.Tmux;
 
 /// <summary>
-/// Shells out to the psmux CLI via <see cref="ProcessStartInfo.ArgumentList"/>
+/// Shells out to the tmux CLI via <see cref="ProcessStartInfo.ArgumentList"/>
 /// (avoids quoting issues). A verb whitelist enforces the read-only guarantee:
 /// input-injecting verbs such as <c>send-keys</c> can never be invoked.
 /// </summary>
-public sealed class PsmuxRunner : IPsmuxClient
+public sealed class TmuxRunner : ITmuxClient
 {
     private static readonly HashSet<string> AllowedVerbs = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -22,29 +22,29 @@ public sealed class PsmuxRunner : IPsmuxClient
 
     private readonly string _exe;
 
-    public PsmuxRunner(string executable) => _exe = executable;
+    public TmuxRunner(string executable) => _exe = executable;
 
-    public PsmuxResult ListPanesRaw(string format) =>
+    public TmuxResult ListPanesRaw(string format) =>
         Run("lsp", "-a", "-F", format);
 
-    public PsmuxResult CapturePane(string paneId) =>
+    public TmuxResult CapturePane(string paneId) =>
         Run("capture-pane", "-p", "-t", paneId);
 
-    public PsmuxResult SwitchClient(string sessionName) =>
+    public TmuxResult SwitchClient(string sessionName) =>
         Run("switch-client", "-t", sessionName);
 
-    public PsmuxResult SelectWindow(string windowTarget) =>
+    public TmuxResult SelectWindow(string windowTarget) =>
         Run("select-window", "-t", windowTarget);
 
-    public PsmuxResult Run(params string[] args)
+    public TmuxResult Run(params string[] args)
     {
         if (args.Length == 0)
-            throw new ArgumentException("At least one psmux verb is required.", nameof(args));
+            throw new ArgumentException("At least one tmux verb is required.", nameof(args));
 
         var verb = args[0];
         if (!AllowedVerbs.Contains(verb))
             throw new InvalidOperationException(
-                $"psmux verb '{verb}' is not permitted; tmux-watch is read-only toward panes.");
+                $"tmux verb '{verb}' is not permitted; tmux-watch is read-only toward panes.");
 
         var psi = new ProcessStartInfo
         {
@@ -63,17 +63,17 @@ public sealed class PsmuxRunner : IPsmuxClient
         {
             using var proc = Process.Start(psi);
             if (proc is null)
-                return PsmuxResult.NotStarted($"Failed to start '{_exe}'.");
+                return TmuxResult.NotStarted($"Failed to start '{_exe}'.");
 
             var stdout = proc.StandardOutput.ReadToEnd();
             var stderr = proc.StandardError.ReadToEnd();
             proc.WaitForExit();
-            return new PsmuxResult(true, proc.ExitCode, stdout, stderr);
+            return new TmuxResult(true, proc.ExitCode, stdout, stderr);
         }
         catch (Win32Exception ex)
         {
             // Executable not found / not on PATH.
-            return PsmuxResult.NotStarted($"Could not run '{_exe}': {ex.Message}");
+            return TmuxResult.NotStarted($"Could not run '{_exe}': {ex.Message}");
         }
     }
 }

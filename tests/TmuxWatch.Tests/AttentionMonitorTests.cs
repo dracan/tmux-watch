@@ -19,7 +19,7 @@ public class AttentionMonitorTests
     private const string Waiting = "❯ 1. Yes\n↑/↓ to navigate · enter to select · esc to cancel";
     private const string Idle = "❯\n/ commands · ? help · space hold to record   Claude Opus 4.8";
 
-    private static AttentionMonitor Build(FakePsmuxClient fake, out FakeClock clock, WatchConfig? cfg = null)
+    private static AttentionMonitor Build(FakeTmuxClient fake, out FakeClock clock, WatchConfig? cfg = null)
     {
         cfg ??= new WatchConfig();
         clock = new FakeClock(DateTimeOffset.UnixEpoch);
@@ -31,7 +31,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Entering_waiting_emits_one_event()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
         var monitor = Build(fake, out var clock);
 
@@ -49,7 +49,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Remaining_waiting_does_not_repeat()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Waiting;
         var monitor = Build(fake, out _);
 
@@ -62,7 +62,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Leaving_waiting_clears_outstanding()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Waiting;
         var monitor = Build(fake, out _);
 
@@ -78,7 +78,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Paused_working_does_not_emit_attention()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
         var monitor = Build(fake, out _);
 
@@ -91,7 +91,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Idle_does_not_emit_unless_enabled()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Idle;
         var monitor = Build(fake, out _);
 
@@ -101,7 +101,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Idle_emits_when_enabled()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
         var monitor = Build(fake, out _, new WatchConfig { NotifyOnIdle = true });
 
@@ -118,7 +118,7 @@ public class AttentionMonitorTests
     {
         // Windows reports "copilot.exe"; the monitor must still classify the
         // captured screen rather than treating the pane as Dead.
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot.exe|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot.exe|0" };
         fake.Captures["%1"] = Waiting;
         var monitor = Build(fake, out _);
 
@@ -131,7 +131,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Disappearing_pane_is_dropped()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
         var monitor = Build(fake, out _);
         monitor.Tick();
@@ -146,7 +146,7 @@ public class AttentionMonitorTests
     [Fact]
     public void Server_failure_keeps_running_with_error()
     {
-        var fake = new FakePsmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
         var monitor = Build(fake, out _);
         monitor.Tick();

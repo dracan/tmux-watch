@@ -1,4 +1,4 @@
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tests;
 
@@ -7,7 +7,7 @@ namespace TmuxWatch.Tests;
 /// between ticks to simulate state transitions. Records switch calls so tests can
 /// assert the TUI never sends input (it only ever calls switch/select here).
 /// </summary>
-public sealed class FakePsmuxClient : IPsmuxClient
+public sealed class FakeTmuxClient : ITmuxClient
 {
     public bool Started { get; set; } = true;
     public int ExitCode { get; set; }
@@ -18,24 +18,24 @@ public sealed class FakePsmuxClient : IPsmuxClient
     public List<string> SwitchedSessions { get; } = new();
     public List<string> SelectedWindows { get; } = new();
 
-    public PsmuxResult ListPanesRaw(string format) =>
-        Started ? new PsmuxResult(true, ExitCode, ListOutput, ErrorMessage)
-                : PsmuxResult.NotStarted(ErrorMessage);
+    public TmuxResult ListPanesRaw(string format) =>
+        Started ? new TmuxResult(true, ExitCode, ListOutput, ErrorMessage)
+                : TmuxResult.NotStarted(ErrorMessage);
 
-    public PsmuxResult CapturePane(string paneId) =>
+    public TmuxResult CapturePane(string paneId) =>
         Captures.TryGetValue(paneId, out var text)
-            ? new PsmuxResult(true, 0, text, "")
-            : new PsmuxResult(true, 0, "", "");
+            ? new TmuxResult(true, 0, text, "")
+            : new TmuxResult(true, 0, "", "");
 
-    public PsmuxResult SwitchClient(string sessionName)
+    public TmuxResult SwitchClient(string sessionName)
     {
         SwitchedSessions.Add(sessionName);
-        return new PsmuxResult(true, 0, "", "");
+        return new TmuxResult(true, 0, "", "");
     }
 
-    public PsmuxResult SelectWindow(string windowTarget)
+    public TmuxResult SelectWindow(string windowTarget)
     {
         SelectedWindows.Add(windowTarget);
-        return new PsmuxResult(true, 0, "", "");
+        return new TmuxResult(true, 0, "", "");
     }
 }

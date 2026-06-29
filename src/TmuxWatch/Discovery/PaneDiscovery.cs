@@ -1,5 +1,5 @@
 using TmuxWatch.Config;
-using TmuxWatch.Psmux;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Discovery;
 
@@ -20,24 +20,24 @@ public sealed class PaneDiscovery
     public const string Format =
         "#{pane_id}|#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_dead}|#{window_name}|#{pane_current_path}|#{window_active}|#{pane_active}";
 
-    private readonly IPsmuxClient _psmux;
+    private readonly ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
 
-    public PaneDiscovery(IPsmuxClient psmux, WatchConfig cfg)
+    public PaneDiscovery(ITmuxClient tmux, WatchConfig cfg)
     {
-        _psmux = psmux;
+        _tmux = tmux;
         _cfg = cfg;
     }
 
     /// <summary>All panes across all sessions (unfiltered).</summary>
     public DiscoveryResult EnumerateAll()
     {
-        var result = _psmux.ListPanesRaw(Format);
+        var result = _tmux.ListPanesRaw(Format);
         if (!result.Started)
             return new DiscoveryResult(Array.Empty<Pane>(), result.StdErr);
         if (result.ExitCode != 0)
             return new DiscoveryResult(Array.Empty<Pane>(),
-                $"psmux exited {result.ExitCode}: {result.StdErr.Trim()}");
+                $"tmux exited {result.ExitCode}: {result.StdErr.Trim()}");
 
         var panes = new List<Pane>();
         foreach (var line in result.StdOut.Replace("\r\n", "\n").Split('\n'))
@@ -71,7 +71,7 @@ public sealed class PaneDiscovery
 
     /// <summary>
     /// Matches the foreground command against the configured Copilot command.
-    /// On Windows psmux reports <c>pane_current_command</c> with the executable
+    /// A Windows/psmux host reports <c>pane_current_command</c> with the executable
     /// extension (e.g. "copilot.exe"), so we also compare the extensionless stem
     /// to keep the configured command ("copilot") working on every platform.
     /// </summary>
