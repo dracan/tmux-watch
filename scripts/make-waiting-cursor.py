@@ -55,9 +55,18 @@ for row in range(H - 1, -1, -1):
     for col in range(W):
         xor += bytes(pixel(col, row))
 
-# AND (mask) data: 1bpp, rows padded to 4 bytes, bottom-up. All zero: alpha governs.
-and_row = b"\x00" * 4
-and_mask = and_row * H
+# AND (mask) data: 1bpp, rows padded to 4 bytes, bottom-up. Bit = 1 where the pixel
+# is transparent, 0 where it is drawn. Deriving this from alpha (rather than leaving it
+# all-zero) keeps the cursor correct on the GDI render path, which ignores the alpha
+# channel and relies on this mask for transparency - otherwise the sprite paints as a
+# solid black block.
+and_mask = bytearray()
+for row in range(H - 1, -1, -1):
+    rowbytes = bytearray(4)  # 32 bits, padded to 4 bytes
+    for col in range(W):
+        if pixel(col, row)[3] == 0:           # transparent -> mask bit set
+            rowbytes[col // 8] |= 0x80 >> (col % 8)
+    and_mask += rowbytes
 
 # BITMAPINFOHEADER: height is doubled (XOR + AND), 32bpp.
 bmih = struct.pack(
