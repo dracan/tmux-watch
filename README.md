@@ -107,6 +107,11 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
   "notifyOnIdle": false,
   "notificationChannel": "bell",
   "statusLineCount": 6,
+  "pointerSignal": {
+    "enabled": false,
+    "waitingCursorFile": "assets/waiting-cursor.cur",
+    "shapes": ["arrow", "ibeam"]
+  },
   "agents": [
     {
       "id": "copilot",
@@ -135,6 +140,30 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
 
 Set `tmuxExecutable` to `psmux` (or another tmux-compatible CLI) to run against a
 different multiplexer host.
+
+### Pointer signal (opt-in)
+
+`pointerSignal` turns the real Windows mouse pointer **red across the whole
+desktop** for as long as *any* watched pane is WAITING, restoring the normal
+pointer once nothing needs you - a persistent ambient reminder that outlasts the
+one-shot bell, visible even when the terminal is minimised. It is **off by
+default**; set `enabled: true` to use it.
+
+- **Scope is global.** Every application shows the red pointer while a pane waits.
+  This is intentional - it is the whole point of the cue.
+- **Out-of-band.** The pointer is changed via an OS call, not a terminal escape
+  sequence, so it behaves identically whether tmux-watch runs inside or outside
+  tmux/PSMUX. It works on native Windows (direct `user32` call) and under WSL
+  (via `powershell.exe`); on any other host it is a no-op.
+- **Crash-safe.** The normal pointer is restored on exit and, defensively, again
+  on every startup - so a pointer left red by an abnormal exit self-heals on the
+  next launch.
+- `waitingCursorFile` is the shipped red arrow asset (relative paths resolve
+  against the app directory); `shapes` chooses which pointer shapes to recolour
+  (`arrow` covers other apps, `ibeam` covers the terminal's text area).
+
+This only ever mutates the watcher's own OS environment; it does not touch
+watched panes and does not affect the read-only guarantee.
 
 > **Claude Code tokens are provisional.** The `claude` IDLE token was verified
 > against a live pane; the WORKING/WAITING tokens are best-effort. If a Claude

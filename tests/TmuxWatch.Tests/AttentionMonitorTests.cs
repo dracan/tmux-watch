@@ -3,11 +3,21 @@ using TmuxWatch.Detection;
 using TmuxWatch.Discovery;
 using TmuxWatch.Monitor;
 using TmuxWatch.Notifications;
+using TmuxWatch.Pointer;
 
 namespace TmuxWatch.Tests;
 
 public class AttentionMonitorTests
 {
+    /// <summary>Records the boolean the monitor drives the pointer with each tick.</summary>
+    private sealed class RecordingPointer : IPointerSignal
+    {
+        public List<bool> Calls { get; } = new();
+        public bool? Last => Calls.Count > 0 ? Calls[^1] : null;
+        public void SetWaiting(bool anyWaiting) => Calls.Add(anyWaiting);
+        public void Restore() { }
+    }
+
     private sealed class FakeClock(DateTimeOffset start) : TimeProvider
     {
         private DateTimeOffset _now = start;
@@ -156,5 +166,60 @@ public class AttentionMonitorTests
 
         Assert.NotNull(snap.Error);
         Assert.Single(snap.Panes);             // prior state retained
+    }
+
+    // --- Pointer signal driven from aggregate state (task 4.3) ---
+
+    private static AttentionMonitor BuildWithPointer(FakeTmuxClient fake, RecordingPointer pointer, out FakeClock clock)
+    {
+        var cfg = new WatchConfig();
+        clock = new FakeClock(DateTimeOffset.UnixEpoch);
+        var discovery = new PaneDiscovery(fake, cfg);
+        return new AttentionMonitor(discovery, fake, cfg, new NullNotifier(), clock, pointer);
+    }
+
+    [Fact]
+    public void Pointer_set_true_when_pane_enters_waiting_and_false_when_resolved()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Working;
+        var pointer = new RecordingPointer();
+        var monitor = BuildWithPointer(fake, pointer, out var clock);
+
+        monitor.Tick();                                  // working
+        Assert.Equal(false, pointer.Last);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Waiting;
+        monitor.Tick();                                  // -> waiting
+        Assert.Equal(true, pointer.Last);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Idle;                      // user responded, pane leaves waiting
+        monitor.Tick();
+        Assert.Equal(false, pointer.Last);
+    }
+
+    [Fact]
+    public void Pointer_stays_true_while_any_pane_still_waiting()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|copilot|0" };
+        fake.Captures["%1"] = Waiting;
+        fake.Captures["%2"] = Waiting;
+        var pointer = new RecordingPointer();
+        var monitor = BuildWithPointer(fake, pointer, out var clock);
+
+        monitor.Tick();                                  // both waiting
+        Assert.Equal(true, pointer.Last);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Idle;                      // one resolves, one still waiting
+        monitor.Tick();
+        Assert.Equal(true, pointer.Last);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%2"] = Idle;                      // last one resolves
+        monitor.Tick();
+        Assert.Equal(false, pointer.Last);
     }
 }

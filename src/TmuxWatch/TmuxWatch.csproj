@@ -15,4 +15,9 @@
     <InternalsVisibleTo Include="TmuxWatch.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shipped pointer-signal cursor asset(s), copied next to the app. -->
+    <None Include="..\..\assets\**\*.cur" Link="assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

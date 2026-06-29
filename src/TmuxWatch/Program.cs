@@ -4,6 +4,7 @@ using TmuxWatch.Detection;
 using TmuxWatch.Discovery;
 using TmuxWatch.Monitor;
 using TmuxWatch.Notifications;
+using TmuxWatch.Pointer;
 using TmuxWatch.Tmux;
 using TmuxWatch.Tui;
 
@@ -25,10 +26,19 @@ if (options.Calibrate)
     return Calibrate(tmux, discovery, cfg);
 
 var notifier = NotifierFactory.Create(cfg);
-var monitor = new AttentionMonitor(discovery, tmux, cfg, notifier);
+var pointer = PointerSignalFactory.Create(cfg);
+
+// Crash-safety: unconditionally restore the normal pointer at startup, before the
+// first tick, so a pointer left red by a prior abnormal exit self-heals on launch.
+pointer.Restore();
+
+var monitor = new AttentionMonitor(discovery, tmux, cfg, notifier, pointer: pointer);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+// Restore on graceful shutdown so the desktop pointer never stays red after exit.
+AppDomain.CurrentDomain.ProcessExit += (_, _) => pointer.Restore();
 
 if (options.Once)
 {

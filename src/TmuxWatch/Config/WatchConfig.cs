@@ -26,6 +26,12 @@ public sealed class WatchConfig
     public string NotificationChannel { get; set; } = "bell";
 
     /// <summary>
+    /// Opt-in pointer signal: recolour the OS mouse pointer while any pane is WAITING.
+    /// Default off. See <see cref="PointerSignalConfig"/>.
+    /// </summary>
+    public PointerSignalConfig PointerSignal { get; set; } = new();
+
+    /// <summary>
     /// Agent profiles to watch. When null or empty, the built-in Copilot + Claude
     /// Code defaults are used.
     /// </summary>
