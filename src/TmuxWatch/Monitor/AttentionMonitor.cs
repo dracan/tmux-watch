@@ -23,7 +23,6 @@ public sealed class AttentionMonitor
 {
     private readonly PaneDiscovery _discovery;
     private readonly Tmux.ITmuxClient _tmux;
-    private readonly WatchConfig _cfg;
     private readonly INotifier _notifier;
     private readonly TimeProvider _clock;
     private readonly IReadOnlyDictionary<string, PaneClassifier> _classifiers;
@@ -39,7 +38,6 @@ public sealed class AttentionMonitor
     {
         _discovery = discovery;
         _tmux = tmux;
-        _cfg = cfg;
         _notifier = notifier;
         _clock = clock ?? TimeProvider.System;
         _classifiers = cfg.ResolveAgents()
@@ -66,17 +64,28 @@ public sealed class AttentionMonitor
             // capture is read-only; a failed capture leaves classification to
             // liveness facts (e.g. Unknown), never crashes the loop.
             var capture = _tmux.CapturePane(pane.Id);
-            var state = _classifiers.TryGetValue(pane.AgentId, out var classifier)
+            var classified = _classifiers.TryGetValue(pane.AgentId, out var classifier)
                 ? classifier.Classify(capture.Ok ? capture.StdOut : null, pane.Dead)
                 : PaneState.Unknown;
 
             if (!_tracked.TryGetValue(pane.Id, out var tracked))
             {
-                tracked = new TrackedPane { Pane = pane, State = state, EnteredAt = now };
+                // First sight has no history, so a pane that is already idle cannot be
+                // a just-finished turn - it stays IDLE (never promoted to DONE).
+                tracked = new TrackedPane { Pane = pane, State = classified, EnteredAt = now };
                 _tracked[pane.Id] = tracked;
-                RaiseIfAttention(tracked, PaneState.Unknown, state, events);
+                RaiseIfAttention(tracked, PaneState.Unknown, classified, events);
                 continue;
             }
+
+            // Derive DONE (monitor-only; the classifier never emits it): a classified
+            // IDLE whose prior state was WORKING is a completed turn, and a pane already
+            // in DONE stays DONE while it keeps classifying IDLE. Any other path into
+            // IDLE (fresh pane above, or WAITING to IDLE) remains IDLE.
+            var state = classified;
+            if (classified == PaneState.Idle &&
+                tracked.State is PaneState.Working or PaneState.Done)
+                state = PaneState.Done;
 
             tracked.Pane = pane;
             if (tracked.State != state)
@@ -95,27 +104,45 @@ public sealed class AttentionMonitor
         return new MonitorSnapshot(SnapshotViews(), events, now, null);
     }
 
+    /// <summary>
+    /// Acknowledge a DONE pane, returning it to IDLE and clearing its outstanding
+    /// attention so it drops out of the DONE cue (notification already fired; pointer
+    /// re-evaluated by the caller). Driven only by an explicit user action, so a pane
+    /// that merely holds focus is never auto-acknowledged. The pane will not re-enter
+    /// DONE until it next completes another WORKING to IDLE cycle. Returns true if a
+    /// DONE pane was actually cleared.
+    /// </summary>
+    public bool Acknowledge(string paneId)
+    {
+        if (_tracked.TryGetValue(paneId, out var tracked) && tracked.State == PaneState.Done)
+        {
+            tracked.State = PaneState.Idle;
+            tracked.AttentionOutstanding = false;
+            tracked.EnteredAt = _clock.GetUtcNow();
+            return true;
+        }
+        return false;
+    }
+
     private void RaiseIfAttention(TrackedPane tracked, PaneState previous, PaneState current, List<AttentionEvent> events)
     {
+        // WAITING (blocked) and DONE (finished, your move) are both "needs you" states:
+        // each notifies once on entry with the same cue and sets the outstanding flag.
         if (current == PaneState.Waiting && previous != PaneState.Waiting)
         {
             tracked.AttentionOutstanding = true;
-            var evt = new AttentionEvent(tracked.Pane, AttentionKind.EnteredWaiting);
-            events.Add(evt);
+            events.Add(new AttentionEvent(tracked.Pane, AttentionKind.EnteredWaiting));
             _notifier.Notify($"{AgentLabel(tracked.Pane.AgentId)} needs you", $"{tracked.Pane.Location} is waiting for input");
         }
-        else if (current == PaneState.Idle && previous != PaneState.Idle)
+        else if (current == PaneState.Done && previous != PaneState.Done)
         {
-            // Leaving WAITING clears the outstanding flag.
-            tracked.AttentionOutstanding = false;
-            if (_cfg.NotifyOnIdle)
-            {
-                events.Add(new AttentionEvent(tracked.Pane, AttentionKind.EnteredIdle));
-                _notifier.Notify($"{AgentLabel(tracked.Pane.AgentId)} idle", $"{tracked.Pane.Location} finished its turn");
-            }
+            tracked.AttentionOutstanding = true;
+            events.Add(new AttentionEvent(tracked.Pane, AttentionKind.EnteredDone));
+            _notifier.Notify($"{AgentLabel(tracked.Pane.AgentId)} finished", $"{tracked.Pane.Location} finished its turn");
         }
-        else if (current != PaneState.Waiting)
+        else if (current != PaneState.Waiting && current != PaneState.Done)
         {
+            // Any other transition (into WORKING, IDLE, DEAD, ...) clears the flag.
             tracked.AttentionOutstanding = false;
         }
     }

@@ -14,23 +14,29 @@ namespace TmuxWatch.Pointer;
 public sealed class WslPointerSignal : PointerSignalBase
 {
     private readonly string _powershell;
-    private readonly string _windowsCursorPath;
+    private readonly string _waitingWindowsPath;
+    private readonly string _doneWindowsPath;
     private readonly uint[] _shapeIds;
 
-    public WslPointerSignal(string cursorFile, IEnumerable<string> shapes, string powershell = "powershell.exe")
+    public WslPointerSignal(string waitingCursorFile, string doneCursorFile, IEnumerable<string> shapes, string powershell = "powershell.exe")
     {
         _powershell = powershell;
-        _windowsCursorPath = ToWindowsPath(cursorFile);
+        _waitingWindowsPath = ToWindowsPath(waitingCursorFile);
+        _doneWindowsPath = ToWindowsPath(doneCursorFile);
         _shapeIds = shapes.Select(MapShape).Where(id => id != 0).Distinct().ToArray();
     }
 
-    protected override void ApplyWaiting()
+    protected override void ApplyWaiting() => ApplyCursor(_waitingWindowsPath);
+
+    protected override void ApplyDone() => ApplyCursor(_doneWindowsPath);
+
+    private void ApplyCursor(string windowsCursorPath)
     {
-        if (_shapeIds.Length == 0 || string.IsNullOrEmpty(_windowsCursorPath))
+        if (_shapeIds.Length == 0 || string.IsNullOrEmpty(windowsCursorPath))
             return;
 
         var ids = string.Join(",", _shapeIds);
-        var path = _windowsCursorPath.Replace("'", "''");
+        var path = windowsCursorPath.Replace("'", "''");
         var script = $@"
 $src = @'
 using System;

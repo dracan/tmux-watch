@@ -18,6 +18,13 @@ public sealed class PointerSignalConfig
     public string WaitingCursorFile { get; set; } = "assets/waiting-cursor.cur";
 
     /// <summary>
+    /// Path to the cursor asset shown while any pane is DONE (a finished turn) and none
+    /// is WAITING. Relative paths are resolved against the app base directory. Defaults
+    /// to the shipped green arrow.
+    /// </summary>
+    public string DoneCursorFile { get; set; } = "assets/done-cursor.cur";
+
+    /// <summary>
     /// Which OS pointer shapes to recolour. "arrow" covers other applications;
     /// "ibeam" covers the terminal's text area.
     /// </summary>

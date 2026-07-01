@@ -88,28 +88,112 @@ public class AttentionMonitorTests
     }
 
     [Fact]
-    public void Idle_does_not_emit_unless_enabled()
+    public void Fresh_idle_pane_is_idle_not_done()
     {
+        // First sight has no history, so an already-idle pane is genuine IDLE, not a
+        // just-finished turn - and it emits no attention event.
         var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Idle;
         var monitor = Build(fake, out _);
 
-        Assert.Empty(monitor.Tick().Events);
+        var snap = monitor.Tick();
+
+        var view = Assert.Single(snap.Panes);
+        Assert.Equal(PaneState.Idle, view.State);
+        Assert.Empty(snap.Events);
     }
 
     [Fact]
-    public void Idle_emits_when_enabled()
+    public void Finishing_a_turn_promotes_to_done_and_notifies_once()
     {
         var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
-        var monitor = Build(fake, out _, new WatchConfig { NotifyOnIdle = true });
+        var monitor = Build(fake, out var clock);
 
-        monitor.Tick();
+        monitor.Tick();                        // working
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Idle;            // WORKING -> IDLE is a completed turn
+        var done = monitor.Tick();
+
+        var view = Assert.Single(done.Panes);
+        Assert.Equal(PaneState.Done, view.State);
+        Assert.True(view.AttentionOutstanding);
+        Assert.Single(done.Events);
+        Assert.Equal(AttentionKind.EnteredDone, done.Events[0].Kind);
+
+        // Still idle on the next poll: stays DONE, no repeat event.
+        clock.Advance(TimeSpan.FromSeconds(2));
+        var again = monitor.Tick();
+        Assert.Equal(PaneState.Done, Assert.Single(again.Panes).State);
+        Assert.Empty(again.Events);
+    }
+
+    [Fact]
+    public void Waiting_to_idle_is_idle_not_done()
+    {
+        // Answering a prompt with no intervening work returns to IDLE, not DONE.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Waiting;
+        var monitor = Build(fake, out _);
+
+        monitor.Tick();                        // waiting
         fake.Captures["%1"] = Idle;
         var snap = monitor.Tick();
 
-        Assert.Single(snap.Events);
-        Assert.Equal(AttentionKind.EnteredIdle, snap.Events[0].Kind);
+        Assert.Equal(PaneState.Idle, Assert.Single(snap.Panes).State);
+    }
+
+    [Fact]
+    public void Acknowledging_done_returns_to_idle_and_does_not_repromote()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Working;
+        var monitor = Build(fake, out _);
+
+        monitor.Tick();                        // working
+        fake.Captures["%1"] = Idle;
+        monitor.Tick();                        // -> DONE
+
+        Assert.True(monitor.Acknowledge("%1"));
+        // The pane is now IDLE and, staying idle, must not bounce back to DONE.
+        var after = monitor.Tick();
+        var view = Assert.Single(after.Panes);
+        Assert.Equal(PaneState.Idle, view.State);
+        Assert.False(view.AttentionOutstanding);
+        Assert.Empty(after.Events);
+    }
+
+    [Fact]
+    public void Acknowledge_is_a_noop_when_pane_is_not_done()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Working;
+        var monitor = Build(fake, out _);
+        monitor.Tick();                        // working, not done
+
+        Assert.False(monitor.Acknowledge("%1"));
+        Assert.False(monitor.Acknowledge("%nonexistent"));
+    }
+
+    [Fact]
+    public void Re_promotes_to_done_only_after_another_work_cycle()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Working;
+        var monitor = Build(fake, out _);
+
+        monitor.Tick();                        // working
+        fake.Captures["%1"] = Idle;
+        monitor.Tick();                        // -> DONE
+        monitor.Acknowledge("%1");             // -> IDLE
+
+        fake.Captures["%1"] = Working;
+        monitor.Tick();                        // working again
+        fake.Captures["%1"] = Idle;
+        var snap = monitor.Tick();             // -> DONE again
+
+        Assert.Equal(PaneState.Done, Assert.Single(snap.Panes).State);
     }
 
     [Fact]

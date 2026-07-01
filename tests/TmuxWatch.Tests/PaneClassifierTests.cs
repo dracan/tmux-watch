@@ -43,6 +43,21 @@ public class PaneClassifierTests
     }
 
     [Fact]
+    public void Classifier_never_returns_done()
+    {
+        // DONE is monitor-derived (a WORKING -> IDLE edge), never produced by the
+        // stateless classifier. Every fixture, under both profiles, must classify to
+        // something other than DONE.
+        var files = Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "fixtures"), "*.txt");
+        foreach (var file in files)
+        {
+            var text = File.ReadAllText(file);
+            Assert.NotEqual(PaneState.Done, Classifier.Classify(text, dead: false));
+            Assert.NotEqual(PaneState.Done, ClaudeClassifier.Classify(text, dead: false));
+        }
+    }
+
+    [Fact]
     public void Claude_idle_is_not_idle_under_copilot_profile()
     {
         // Each agent's IDLE hint is its own; the copilot profile must not read

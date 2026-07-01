@@ -1,5 +1,6 @@
 using TmuxWatch.Detection;
 using TmuxWatch.Monitor;
+using TmuxWatch.Pointer;
 using TmuxWatch.Tmux;
 using TmuxWatch.Tui;
 
@@ -7,60 +8,81 @@ namespace TmuxWatch.Tests;
 
 public class WatcherPointerTests
 {
-    private static TrackedPaneView View(string id, bool outstanding) =>
+    private static TrackedPaneView View(string id, PaneState state) =>
         new(
             new Pane(id, "s", 0, 0, "copilot", false, id, "", WindowActive: false, PaneActive: false),
-            outstanding ? PaneState.Waiting : PaneState.Working,
+            state,
             DateTimeOffset.UnixEpoch,
-            outstanding);
+            AttentionOutstanding: state is PaneState.Waiting or PaneState.Done);
+
+    private static PointerState Aggregate(IReadOnlyList<TrackedPaneView> panes, params string[] paused) =>
+        WatcherApp.AggregatePointerState(panes, new HashSet<string>(paused));
 
     [Fact]
-    public void No_panes_is_not_active_waiting()
+    public void No_panes_is_normal()
     {
-        Assert.False(WatcherApp.AnyActiveWaiting(new List<TrackedPaneView>(), new HashSet<string>()));
+        Assert.Equal(PointerState.Normal, Aggregate(new List<TrackedPaneView>()));
     }
 
     [Fact]
-    public void Waiting_unpaused_pane_is_active_waiting()
+    public void Waiting_unpaused_pane_is_red()
     {
-        var panes = new List<TrackedPaneView> { View("%1", outstanding: true) };
-        Assert.True(WatcherApp.AnyActiveWaiting(panes, new HashSet<string>()));
+        var panes = new List<TrackedPaneView> { View("%1", PaneState.Waiting) };
+        Assert.Equal(PointerState.Waiting, Aggregate(panes));
     }
 
     [Fact]
-    public void Paused_waiting_pane_is_excluded()
+    public void Done_unpaused_pane_is_green()
     {
-        var panes = new List<TrackedPaneView> { View("%1", outstanding: true) };
-        Assert.False(WatcherApp.AnyActiveWaiting(panes, new HashSet<string> { "%1" }));
+        var panes = new List<TrackedPaneView> { View("%1", PaneState.Done) };
+        Assert.Equal(PointerState.Done, Aggregate(panes));
     }
 
     [Fact]
-    public void Non_waiting_pane_is_not_active_waiting()
-    {
-        var panes = new List<TrackedPaneView> { View("%1", outstanding: false) };
-        Assert.False(WatcherApp.AnyActiveWaiting(panes, new HashSet<string>()));
-    }
-
-    [Fact]
-    public void Held_active_while_one_waiting_pane_is_not_paused()
+    public void Waiting_takes_precedence_over_done()
     {
         var panes = new List<TrackedPaneView>
         {
-            View("%1", outstanding: true),
-            View("%2", outstanding: true),
+            View("%1", PaneState.Done),
+            View("%2", PaneState.Waiting),
         };
-        // One of the two waiting panes is paused; the other still demands attention.
-        Assert.True(WatcherApp.AnyActiveWaiting(panes, new HashSet<string> { "%1" }));
+        Assert.Equal(PointerState.Waiting, Aggregate(panes));
     }
 
     [Fact]
-    public void Cleared_when_all_waiting_panes_are_paused()
+    public void Done_remains_green_when_waiting_pane_is_paused()
     {
         var panes = new List<TrackedPaneView>
         {
-            View("%1", outstanding: true),
-            View("%2", outstanding: true),
+            View("%1", PaneState.Waiting),
+            View("%2", PaneState.Done),
         };
-        Assert.False(WatcherApp.AnyActiveWaiting(panes, new HashSet<string> { "%1", "%2" }));
+        // The only waiting pane is parked, so the green (done) cue takes over.
+        Assert.Equal(PointerState.Done, Aggregate(panes, "%1"));
+    }
+
+    [Fact]
+    public void Paused_waiting_pane_alone_is_normal()
+    {
+        var panes = new List<TrackedPaneView> { View("%1", PaneState.Waiting) };
+        Assert.Equal(PointerState.Normal, Aggregate(panes, "%1"));
+    }
+
+    [Fact]
+    public void Paused_done_pane_alone_is_normal()
+    {
+        var panes = new List<TrackedPaneView> { View("%1", PaneState.Done) };
+        Assert.Equal(PointerState.Normal, Aggregate(panes, "%1"));
+    }
+
+    [Fact]
+    public void Working_and_idle_panes_are_normal()
+    {
+        var panes = new List<TrackedPaneView>
+        {
+            View("%1", PaneState.Working),
+            View("%2", PaneState.Idle),
+        };
+        Assert.Equal(PointerState.Normal, Aggregate(panes));
     }
 }

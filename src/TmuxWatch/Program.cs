@@ -17,7 +17,6 @@ if (options.ShowHelp)
 
 var cfg = WatchConfig.Load(options.ConfigPath);
 if (options.IntervalSeconds is { } iv) cfg.PollIntervalSeconds = iv;
-if (options.NotifyIdle) cfg.NotifyOnIdle = true;
 
 var tmux = new TmuxRunner(cfg.TmuxExecutable);
 var discovery = new PaneDiscovery(tmux, cfg);
@@ -113,7 +112,6 @@ sealed class CliOptions
     public double? IntervalSeconds { get; private set; }
     public bool Calibrate { get; private set; }
     public bool Once { get; private set; }
-    public bool NotifyIdle { get; private set; }
     public bool ShowHelp { get; private set; }
 
     public static CliOptions Parse(string[] args)
@@ -129,7 +127,6 @@ sealed class CliOptions
                     break;
                 case "--calibrate": o.Calibrate = true; break;
                 case "--once": o.Once = true; break;
-                case "--notify-idle": o.NotifyIdle = true; break;
                 case "-h" or "--help": o.ShowHelp = true; break;
             }
         }
@@ -145,7 +142,6 @@ sealed class CliOptions
         AnsiConsole.WriteLine("Usage: tmux-watch [options]");
         AnsiConsole.WriteLine("  --config <path>     Load JSON config (agents, interval, notifications)");
         AnsiConsole.WriteLine("  --interval <sec>    Poll interval override");
-        AnsiConsole.WriteLine("  --notify-idle       Also notify when a pane goes idle");
         AnsiConsole.WriteLine("  --calibrate         Print classification of all live panes and exit");
         AnsiConsole.WriteLine("  --once              Print one classification snapshot and exit");
         AnsiConsole.WriteLine("  -h, --help          Show this help");

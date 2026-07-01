@@ -10,8 +10,10 @@ public class PointerSignalTests
     private sealed class RecordingPointerSignal : PointerSignalBase
     {
         public int WaitingApplied { get; private set; }
+        public int DoneApplied { get; private set; }
         public int NormalApplied { get; private set; }
         protected override void ApplyWaiting() => WaitingApplied++;
+        protected override void ApplyDone() => DoneApplied++;
         protected override void ApplyNormal() => NormalApplied++;
     }
 
@@ -47,6 +49,7 @@ public class PointerSignalTests
           "pointerSignal": {
             "enabled": true,
             "waitingCursorFile": "custom/red.cur",
+            "doneCursorFile": "custom/green.cur",
             "shapes": ["arrow"]
           }
         }
@@ -56,7 +59,14 @@ public class PointerSignalTests
 
         Assert.True(cfg.PointerSignal.Enabled);
         Assert.Equal("custom/red.cur", cfg.PointerSignal.WaitingCursorFile);
+        Assert.Equal("custom/green.cur", cfg.PointerSignal.DoneCursorFile);
         Assert.Equal(new[] { "arrow" }, cfg.PointerSignal.Shapes);
+    }
+
+    [Fact]
+    public void Done_cursor_file_defaults_to_shipped_green()
+    {
+        Assert.Equal("assets/done-cursor.cur", new WatchConfig().PointerSignal.DoneCursorFile);
     }
 
     // --- Factory host/enabled selection (tasks 2.3 / 3.3) ---
@@ -71,20 +81,36 @@ public class PointerSignalTests
     // --- Base transition logic (task 2.1) ---
 
     [Fact]
-    public void Set_waiting_applies_only_on_transitions()
+    public void Set_state_applies_only_on_transitions()
     {
         var p = new RecordingPointerSignal();
 
-        p.SetWaiting(true);      // edge: normal -> waiting
-        p.SetWaiting(true);      // no edge
-        p.SetWaiting(true);      // no edge
+        p.SetState(PointerState.Waiting);   // edge: normal -> waiting
+        p.SetState(PointerState.Waiting);   // no edge
+        p.SetState(PointerState.Waiting);   // no edge
         Assert.Equal(1, p.WaitingApplied);
         Assert.Equal(0, p.NormalApplied);
 
-        p.SetWaiting(false);     // edge: waiting -> normal
-        p.SetWaiting(false);     // no edge
+        p.SetState(PointerState.Normal);    // edge: waiting -> normal
+        p.SetState(PointerState.Normal);    // no edge
         Assert.Equal(1, p.WaitingApplied);
         Assert.Equal(1, p.NormalApplied);
+    }
+
+    [Fact]
+    public void Set_state_transitions_between_waiting_and_done_directly()
+    {
+        var p = new RecordingPointerSignal();
+
+        p.SetState(PointerState.Done);      // normal -> done (green)
+        Assert.Equal(1, p.DoneApplied);
+
+        p.SetState(PointerState.Waiting);   // done -> waiting (red), no restore needed
+        Assert.Equal(1, p.WaitingApplied);
+
+        p.SetState(PointerState.Done);      // waiting -> done (green) again
+        Assert.Equal(2, p.DoneApplied);
+        Assert.Equal(0, p.NormalApplied);   // colour swaps never route through normal
     }
 
     [Fact]
@@ -92,10 +118,10 @@ public class PointerSignalTests
     {
         var p = new RecordingPointerSignal();
 
-        p.Restore();             // unconditional restore even from initial state
+        p.Restore();                        // unconditional restore even from initial state
         Assert.Equal(1, p.NormalApplied);
 
-        p.SetWaiting(true);      // applies again because Restore cleared the flag
+        p.SetState(PointerState.Waiting);   // applies again because Restore cleared the flag
         Assert.Equal(1, p.WaitingApplied);
     }
 }

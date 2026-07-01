@@ -39,16 +39,30 @@ public sealed class WatcherApp
     }
 
     /// <summary>
-    /// True when a pane needs the user and is NOT paused. The pointer signal mirrors
-    /// this - paused panes live in the secondary table and are deliberately excluded,
-    /// so parking a waiting pane clears the cue and resuming it re-arms it.
+    /// Aggregate pointer cue over the non-paused panes: red (Waiting) if any needs an
+    /// answer, else green (Done) if any finished its turn, else normal. Paused panes
+    /// live in the secondary table and are deliberately excluded, so parking a pane
+    /// clears its cue and resuming it re-arms it. WAITING outranks DONE.
     /// </summary>
-    internal static bool AnyActiveWaiting(IReadOnlyList<TrackedPaneView> panes, IReadOnlySet<string> pausedIds) =>
-        panes.Any(p => p.AttentionOutstanding && !pausedIds.Contains(p.Pane.Id));
+    internal static PointerState AggregatePointerState(
+        IReadOnlyList<TrackedPaneView> panes, IReadOnlySet<string> pausedIds)
+    {
+        var anyDone = false;
+        foreach (var p in panes)
+        {
+            if (pausedIds.Contains(p.Pane.Id))
+                continue;
+            if (p.State == PaneState.Waiting)
+                return PointerState.Waiting;   // red wins; no need to look further
+            if (p.State == PaneState.Done)
+                anyDone = true;
+        }
+        return anyDone ? PointerState.Done : PointerState.Normal;
+    }
 
     /// <summary>Drive the level-triggered pointer cue from the non-paused panes.</summary>
     private void DrivePointer(IReadOnlyList<TrackedPaneView> all) =>
-        _pointer.SetWaiting(AnyActiveWaiting(all, _paused));
+        _pointer.SetState(AggregatePointerState(all, _paused));
 
     public void Run(CancellationToken token)
     {
@@ -126,6 +140,22 @@ public sealed class WatcherApp
                         render(all);
                         ctx.Refresh();
                     }
+                    else if (key.Key == ConsoleKey.A)
+                    {
+                        // Acknowledge the focused pane if it is DONE, without switching
+                        // to it - the keystroke is what clears it, so a pane that
+                        // already holds focus is never auto-acknowledged. Re-render and
+                        // re-drive the pointer so the green cue clears immediately.
+                        var focused = all.FirstOrDefault(v => v.Pane.IsFocused);
+                        if (focused is not null && _monitor.Acknowledge(focused.Pane.Id))
+                        {
+                            ApplyOptimisticAck(all, focused.Pane.Id);
+                            all = OrderAll(all, _paused);
+                            render(all);
+                            DrivePointer(all);
+                            ctx.Refresh();
+                        }
+                    }
                     else if (char.IsDigit(key.KeyChar))
                     {
                         var index = key.KeyChar - '1';
@@ -133,10 +163,15 @@ public sealed class WatcherApp
                         {
                             var target = all[index].Pane;
                             SwitchTo(target);
+                            // Jumping to a DONE pane acknowledges it (you have seen it).
+                            if (_monitor.Acknowledge(target.Id))
+                                ApplyOptimisticAck(all, target.Id);
                             // Optimistically move the focus marker so it updates
                             // instantly instead of waiting for the next poll.
                             ApplyOptimisticFocus(all, target);
+                            all = OrderAll(all, _paused);
                             render(all);
+                            DrivePointer(all);
                             ctx.Refresh();
                         }
                     }
@@ -193,6 +228,21 @@ public sealed class WatcherApp
         }
     }
 
+    /// <summary>
+    /// Reflects an acknowledgement in the local view immediately: a DONE pane becomes
+    /// IDLE with no outstanding attention, so the row and pointer update this frame
+    /// instead of waiting for the next poll to reconcile with the monitor.
+    /// </summary>
+    internal static void ApplyOptimisticAck(List<TrackedPaneView> ordered, string paneId)
+    {
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var view = ordered[i];
+            if (view.Pane.Id == paneId && view.State == PaneState.Done)
+                ordered[i] = view with { State = PaneState.Idle, AttentionOutstanding = false };
+        }
+    }
+
     private void SwitchTo(Pane pane)
     {
         // Focus-only: switch session then select the window. Never sends input.
@@ -217,11 +267,12 @@ public sealed class WatcherApp
     private static int Priority(PaneState state) => state switch
     {
         PaneState.Waiting => 0,
-        PaneState.Working => 1,
-        PaneState.Idle => 2,
-        PaneState.Unknown => 3,
-        PaneState.Dead => 4,
-        _ => 5,
+        PaneState.Done => 1,
+        PaneState.Working => 2,
+        PaneState.Idle => 3,
+        PaneState.Unknown => 4,
+        PaneState.Dead => 5,
+        _ => 6,
     };
 
     private IRenderable BuildView(List<TrackedPaneView> all, string? error, DateTimeOffset now)
@@ -237,7 +288,7 @@ public sealed class WatcherApp
             number[p.Pane.Id] = n++;
 
         var main = BuildPaneTable(
-            "tmux-watch — agent panes  (number = switch · ► = focused · p = pause/resume · w = wide · q = quit)",
+            "tmux-watch - agent panes  (number = switch · ► = focused · a = ack done · p = pause/resume · w = wide · q = quit)",
             active, number, now, _wideMode);
 
         if (all.Count == 0)
@@ -319,6 +370,7 @@ public sealed class WatcherApp
     private static string StateMarkup(PaneState state, bool attention) => state switch
     {
         PaneState.Waiting => "[yellow]● WAITING[/]",
+        PaneState.Done => "[bold green]✓ DONE[/]",
         PaneState.Working => "[blue]◐ working[/]",
         PaneState.Idle => "[green]○ idle[/]",
         PaneState.Dead => "[red]✗ dead[/]",

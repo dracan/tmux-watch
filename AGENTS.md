@@ -10,6 +10,9 @@ point here so there is a single source of truth.
 coding-agent CLI sessions (GitHub Copilot CLI and Claude Code) running in **tmux**
 panes, classifies each pane (WAITING / WORKING / IDLE / DEAD) from its captured
 status bar, and surfaces the ones needing the user - with a jump-to-pane action.
+The monitor also derives a **DONE** state ("turn finished, your move") from the
+WORKING→IDLE transition; it is not a classifier signal (the classifier is stateless)
+but a per-pane state-machine promotion, acknowledged back to IDLE by a keystroke.
 Agents are pluggable `AgentProfile`s (`src/TmuxWatch/Config/`).
 
 ## Prerequisites

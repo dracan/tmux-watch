@@ -31,15 +31,25 @@ Each poll:
    |-------|----------------------------------|
    | **WAITING** | numbered cursor `❯ 1.` **or** a footer with `↑/↓` + `esc to cancel` (covers command-approval *and* `ask_user`) |
    | **WORKING** | spinner glyph (`◎ ◉ ● ○`) + the word `Working`, **or** a spinner glyph + the action label + `esc cancel` footer (newer builds show the current action instead of `Working`) |
+   | **DONE** | *derived, not a bottom-of-pane token:* the monitor promotes a pane to DONE on the WORKING→IDLE transition (a finished turn - "your move"); see below |
    | **IDLE** | input box + `/ commands · ? help · space hold to record` |
    | **DEAD** | foreground command is no longer `copilot`, or the pane is dead |
+
+   **DONE ("your move").** A finished turn drops the agent to the same idle input box
+   as a long-untouched pane, so "just finished (e.g. an `openspec propose` completed -
+   run `openspec apply` next)" is indistinguishable from "genuinely idle" by capture
+   alone. The monitor derives **DONE** from the WORKING→IDLE transition instead: DONE
+   sorts just below WAITING, rings the same bell on entry, and (with the pointer signal
+   on) turns the pointer green. Acknowledge a DONE pane back to IDLE by switching to it
+   (its number key) or pressing **`a`** on the focused row; acknowledgement is
+   keystroke-driven, so a pane that already has focus never self-acknowledges.
 
 The foreground-command match is extension-insensitive, so a Windows/psmux host
 (`pane_current_command` reports `copilot.exe`) is detected the same as the bare
 `copilot` command on Linux/macOS.
 
 4. Drives a per-pane state machine and **notifies once** when a pane *enters*
-   WAITING (edge-triggered, not every poll).
+   WAITING, and once when a pane *enters* DONE (both edge-triggered, not every poll).
 
 > **Read-only guarantee:** tmux-watch never sends keystrokes to a watched pane.
 > The tmux access layer whitelists only `lsp`, `capture-pane`, `display-message`,
@@ -73,8 +83,9 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 directly.
 
 In the TUI: press a **number key** to switch the terminal to that pane,
-**`p`** to pause/resume the focused (`►`) pane, **`w`** to toggle wide mode,
-and `q`/`Esc` to quit.
+**`a`** to acknowledge the focused (`►`) pane if it is DONE (clears it back to IDLE
+without switching), **`p`** to pause/resume the focused pane, **`w`** to toggle wide
+mode, and `q`/`Esc` to quit.
 
 Wide mode reveals the **Path** and **Loc** columns, which are hidden by default
 so the table fits a thin terminal split. It is per-run and starts disabled.
@@ -90,7 +101,6 @@ state is per-run and is not persisted across restarts.
 |--------|-------------|
 | `--config <path>` | Load a JSON config (tokens, interval, notifications) |
 | `--interval <sec>` | Poll interval override (default 2s) |
-| `--notify-idle` | Also notify when a pane finishes a turn (goes IDLE) |
 | `--calibrate` | Print classification of all live panes and exit |
 | `--once` | Print one classification snapshot and exit |
 | `-h`, `--help` | Show help |
@@ -106,12 +116,12 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
 {
   "tmuxExecutable": "tmux",
   "pollIntervalSeconds": 2.0,
-  "notifyOnIdle": false,
   "notificationChannel": "bell",
   "statusLineCount": 6,
   "pointerSignal": {
     "enabled": false,
     "waitingCursorFile": "assets/waiting-cursor.cur",
+    "doneCursorFile": "assets/done-cursor.cur",
     "shapes": ["arrow", "ibeam"]
   },
   "agents": [
@@ -147,11 +157,13 @@ different multiplexer host.
 
 ### Pointer signal (opt-in)
 
-`pointerSignal` turns the real Windows mouse pointer **red across the whole
-desktop** for as long as any *non-paused* watched pane is WAITING, restoring the
-normal pointer once nothing needs you - a persistent ambient reminder that
-outlasts the one-shot bell, visible even when the terminal is minimised. It is
-**off by default**; set `enabled: true` to use it.
+`pointerSignal` turns the real Windows mouse pointer a **signal colour across the
+whole desktop** for as long as any *non-paused* watched pane needs you - **red**
+while any pane is WAITING, **green** while any pane is DONE (a finished turn) and none
+is WAITING - restoring the normal pointer once nothing needs you. It is a persistent
+ambient reminder that outlasts the one-shot bell, visible even when the terminal is
+minimised. WAITING (red) takes precedence over DONE (green) when both are present. It
+is **off by default**; set `enabled: true` to use it.
 
 - **Paused panes are excluded.** Panes you have parked (pressed `p`, moved to the
   secondary table) do not trigger the pointer - so pausing a waiting pane clears
@@ -166,9 +178,10 @@ outlasts the one-shot bell, visible even when the terminal is minimised. It is
 - **Crash-safe.** The normal pointer is restored on exit and, defensively, again
   on every startup - so a pointer left red by an abnormal exit self-heals on the
   next launch.
-- `waitingCursorFile` is the shipped red arrow asset (relative paths resolve
-  against the app directory); `shapes` chooses which pointer shapes to recolour
-  (`arrow` covers other apps, `ibeam` covers the terminal's text area).
+- `waitingCursorFile` and `doneCursorFile` are the shipped red and green arrow assets
+  (relative paths resolve against the app directory); `shapes` chooses which pointer
+  shapes to recolour (`arrow` covers other apps, `ibeam` covers the terminal's text
+  area).
 
 This only ever mutates the watcher's own OS environment; it does not touch
 watched panes and does not affect the read-only guarantee.

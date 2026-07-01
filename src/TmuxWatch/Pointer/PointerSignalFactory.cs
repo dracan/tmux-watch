@@ -18,19 +18,21 @@ public static class PointerSignalFactory
         if (!cfg.Enabled)
             return new NullPointerSignal();
 
-        var cursorFile = Path.IsPathRooted(cfg.WaitingCursorFile)
-            ? cfg.WaitingCursorFile
-            : Path.Combine(baseDir, cfg.WaitingCursorFile);
+        var waitingFile = Resolve(cfg.WaitingCursorFile, baseDir);
+        var doneFile = Resolve(cfg.DoneCursorFile, baseDir);
 
         if (OperatingSystem.IsWindows())
-            return new WindowsPointerSignal(cursorFile, cfg.Shapes);
+            return new WindowsPointerSignal(waitingFile, doneFile, cfg.Shapes);
 
         if (IsWsl())
-            return new WslPointerSignal(cursorFile, cfg.Shapes);
+            return new WslPointerSignal(waitingFile, doneFile, cfg.Shapes);
 
         // Linux desktop, macOS, etc.: no path to a Windows pointer - degrade quietly.
         return new NullPointerSignal();
     }
+
+    private static string Resolve(string file, string baseDir) =>
+        Path.IsPathRooted(file) ? file : Path.Combine(baseDir, file);
 
     /// <summary>True when running under WSL, where powershell.exe can reach the
     /// Windows session.</summary>

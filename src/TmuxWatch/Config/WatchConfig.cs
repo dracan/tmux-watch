@@ -22,8 +22,6 @@ public sealed class WatchConfig
     /// box (with a sub-agent panel below) and tall selection-menu cursors.</summary>
     public int StatusLineCount { get; set; } = 16;
 
-    public bool NotifyOnIdle { get; set; } = false;
-
     /// <summary>Notification channel: "bell", "none" (extendable, e.g. "toast").</summary>
     public string NotificationChannel { get; set; } = "bell";
 

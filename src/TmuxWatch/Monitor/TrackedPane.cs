@@ -13,7 +13,7 @@ public sealed record TrackedPaneView(
     public TimeSpan TimeInState(DateTimeOffset now) => now - EnteredAt;
 }
 
-public enum AttentionKind { EnteredWaiting, EnteredIdle }
+public enum AttentionKind { EnteredWaiting, EnteredDone }
 
 public sealed record AttentionEvent(Pane Pane, AttentionKind Kind);
 

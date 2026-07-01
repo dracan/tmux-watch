@@ -1,8 +1,21 @@
-# watcher-tui Specification
+## ADDED Requirements
 
-## Purpose
-TBD - created by archiving change add-copilot-pane-watcher. Update Purpose after archive.
-## Requirements
+### Requirement: Acknowledge a DONE pane without switching
+
+The system SHALL provide a keyboard action (the `a` key) that acknowledges the focused DONE pane, returning it to IDLE and clearing its contribution to the DONE cue, without switching the client to that pane. Acknowledgement SHALL be driven by the keystroke, so a pane that already holds focus when it enters DONE is not auto-acknowledged. The action SHALL be a no-op when the focused pane is not DONE.
+
+#### Scenario: Ack key clears the focused DONE pane
+
+- **WHEN** the focused pane is DONE and the user presses `a`
+- **THEN** the pane returns to IDLE, its DONE cue clears, and the client focus does not move
+
+#### Scenario: Ack key on a non-DONE pane does nothing
+
+- **WHEN** the focused pane is not DONE and the user presses `a`
+- **THEN** no state change occurs
+
+## MODIFIED Requirements
+
 ### Requirement: Live status view of watched panes
 
 The system SHALL present a live Spectre.Console view listing each watched agent pane with its **matched agent**, session and window location, current classified state shown via a distinct visual indicator, and its time-in-state. The DONE state SHALL be rendered with its own distinct indicator, separate from IDLE.
@@ -54,27 +67,3 @@ The system SHALL provide a keyboard action that switches the attached terminal c
 
 - **WHEN** the user selects a DONE pane and triggers the switch action
 - **THEN** the system brings that pane into focus and the pane returns to IDLE (acknowledged)
-
-### Requirement: Read-only guarantee toward watched panes
-
-The system MUST NOT send keystrokes or input into any watched Copilot pane; the only psmux state changes it may cause are attaching/selecting the client's own focus (`switch-client`, `select-window`).
-
-#### Scenario: No input is sent to Copilot
-
-- **WHEN** the user interacts with the watcher TUI in any way
-- **THEN** the system never issues `send-keys` (or any input-injecting verb) to a watched Copilot pane
-
-### Requirement: Acknowledge a DONE pane without switching
-
-The system SHALL provide a keyboard action (the `a` key) that acknowledges the focused DONE pane, returning it to IDLE and clearing its contribution to the DONE cue, without switching the client to that pane. Acknowledgement SHALL be driven by the keystroke, so a pane that already holds focus when it enters DONE is not auto-acknowledged. The action SHALL be a no-op when the focused pane is not DONE.
-
-#### Scenario: Ack key clears the focused DONE pane
-
-- **WHEN** the focused pane is DONE and the user presses `a`
-- **THEN** the pane returns to IDLE, its DONE cue clears, and the client focus does not move
-
-#### Scenario: Ack key on a non-DONE pane does nothing
-
-- **WHEN** the focused pane is not DONE and the user presses `a`
-- **THEN** no state change occurs
-

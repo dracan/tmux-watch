@@ -5,10 +5,10 @@ namespace TmuxWatch.Pointer;
 
 /// <summary>
 /// Native Windows backend. Replaces the system cursor for the configured shapes with a
-/// red cursor loaded from a file (<c>SetSystemCursor</c>), and restores the user's
-/// normal cursors by reloading them from the registry
-/// (<c>SystemParametersInfo(SPI_SETCURSORS)</c>). The change is global to the desktop
-/// and persists in the Windows session independent of this process.
+/// coloured cursor loaded from a file (<c>SetSystemCursor</c>) - red while WAITING,
+/// green while DONE - and restores the user's normal cursors by reloading them from the
+/// registry (<c>SystemParametersInfo(SPI_SETCURSORS)</c>). The change is global to the
+/// desktop and persists in the Windows session independent of this process.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsPointerSignal : PointerSignalBase
@@ -19,27 +19,33 @@ public sealed class WindowsPointerSignal : PointerSignalBase
     private const uint SPI_SETCURSORS = 0x0057;
     private const uint SPIF_SENDCHANGE = 0x02;
 
-    private readonly string _cursorFile;
+    private readonly string _waitingCursorFile;
+    private readonly string _doneCursorFile;
     private readonly uint[] _shapeIds;
 
-    public WindowsPointerSignal(string cursorFile, IEnumerable<string> shapes)
+    public WindowsPointerSignal(string waitingCursorFile, string doneCursorFile, IEnumerable<string> shapes)
     {
-        _cursorFile = cursorFile;
+        _waitingCursorFile = waitingCursorFile;
+        _doneCursorFile = doneCursorFile;
         _shapeIds = shapes.Select(MapShape).Where(id => id != 0).Distinct().ToArray();
     }
 
-    protected override void ApplyWaiting()
+    protected override void ApplyWaiting() => ApplyCursor(_waitingCursorFile);
+
+    protected override void ApplyDone() => ApplyCursor(_doneCursorFile);
+
+    private void ApplyCursor(string cursorFile)
     {
         try
         {
-            if (!File.Exists(_cursorFile) || _shapeIds.Length == 0)
+            if (!File.Exists(cursorFile) || _shapeIds.Length == 0)
                 return;
 
             // SetSystemCursor takes ownership of (destroys) the handle it is given, so
             // load a fresh copy per shape.
             foreach (var id in _shapeIds)
             {
-                var hcur = LoadCursorFromFile(_cursorFile);
+                var hcur = LoadCursorFromFile(cursorFile);
                 if (hcur != IntPtr.Zero)
                     SetSystemCursor(hcur, id);
             }
