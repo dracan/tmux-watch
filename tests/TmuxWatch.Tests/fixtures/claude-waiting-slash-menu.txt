@@ -1,0 +1,27 @@
+● Synthetic fixture - Claude Code waiting on a tall slash-command selection menu
+  (no real content). The "❯ 1." selection cursor is many lines above the bottom,
+  and the footer reads "Enter to select · ↑/↓ to navigate · Esc to cancel" (note
+  the capitalised "Esc to cancel").
+
+● Walking the synthetic items one at a time.
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ First synthetic item
+
+Item 1 of 5 · Synthetic group
+
+A synthetic description line that stands in for whatever the menu is asking about,
+long enough to wrap across the pane width like the real prompt does.
+
+Why include: a synthetic justification line.
+
+❯ 1. Accept (in draft)
+     Use this one.
+  2. Reject
+     Don't use this.
+  3. Skip
+     Leave it, decide later.
+  4. Type something.
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

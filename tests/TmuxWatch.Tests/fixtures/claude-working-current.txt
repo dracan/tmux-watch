@@ -1,0 +1,18 @@
+● Synthetic fixture - Claude Code actively working in the current build (no real
+  content). The live spinner line is "<glyph> <Gerund>… (<dur> · <arrow> <n> tokens)"
+  and crucially NO LONGER contains "esc to interrupt". The spinner line also sits
+  ABOVE the input box, so it is not the last non-blank line.
+
+● Doing some synthetic work on the thing.
+
+  Ran 1 shell command
+
+● A second synthetic step, writing results.
+
+✻ Enchanting… (32s · ↓ 1.4k tokens)
+
+─────────────────────────────────────────────────────────────────────────────────────── project ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

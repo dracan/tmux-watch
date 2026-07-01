@@ -1,0 +1,18 @@
+● Synthetic fixture - Claude Code IDLE at the prompt right after finishing a turn
+  (no real content). This is the negative control for WORKING detection: the frozen
+  completed line "✻ Crunched for 54s" starts with a spinner glyph from the SAME
+  animation set as the live working line, but it is past-tense "<Word> for <dur>"
+  with NO ellipsis and NO live meter, so it must NOT be classified WORKING.
+
+● A synthetic closing summary of the work that just completed.
+
+✻ Crunched for 54s
+
+※ recap: a synthetic recap line standing in for the end-of-turn summary the real
+  build prints, with nothing pending.
+                                                                new task? /clear to save 12.3k tokens
+─────────────────────────────────────────────────────────────────────────────────────── todo: ideas ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

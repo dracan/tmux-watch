@@ -30,6 +30,12 @@ public class PaneClassifierTests
     [InlineData("claude-waiting.txt", PaneState.Waiting)]
     [InlineData("claude-working.txt", PaneState.Working)]
     [InlineData("claude-idle.txt", PaneState.Idle)]
+    // Current Claude Code build (status bar changed; "esc to interrupt" gone).
+    [InlineData("claude-working-current.txt", PaneState.Working)]
+    [InlineData("claude-working-subagents.txt", PaneState.Working)]
+    [InlineData("claude-working-dot-frame.txt", PaneState.Working)]
+    [InlineData("claude-waiting-slash-menu.txt", PaneState.Waiting)]
+    [InlineData("claude-idle-after-work.txt", PaneState.Idle)]
     public void Classifies_claude_fixtures(string fixture, PaneState expected)
     {
         var state = ClaudeClassifier.Classify(Fixture(fixture), dead: false);
@@ -111,6 +117,47 @@ public class PaneClassifierTests
         // Claude's "esc to interrupt" marker is sufficient without a known spinner glyph.
         var text = "some output\n✶ Cogitating… (3s · esc to interrupt)";
         Assert.Equal(PaneState.Working, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Claude_live_spinner_animation_stays_working()
+    {
+        // The action word is random and the glyph is an animation frame; the live
+        // line stays WORKING through the cycle as long as the gerund+ellipsis (or
+        // meter) qualifier holds. "esc to interrupt" is gone in the current build.
+        foreach (var glyph in new[] { "✻", "✽", "✶", "✷", "✸", "✹", "✺", "✢", "✳", "∗" })
+        {
+            var ellipsis = $"more output\n {glyph} Enchanting…\n────\n❯\n────\n  -- INSERT --";
+            Assert.Equal(PaneState.Working, ClaudeClassifier.Classify(ellipsis, dead: false));
+
+            var meter = $"more output\n {glyph} Tinkering… (32s · ↓ 1.4k tokens)\n────\n❯\n────\n  -- INSERT --";
+            Assert.Equal(PaneState.Working, ClaudeClassifier.Classify(meter, dead: false));
+        }
+    }
+
+    [Theory]
+    // The spinner animates through frames outside the asterisk whitelist (·, *).
+    // The activity meter is glyph-independent, so the live line must still read
+    // WORKING regardless of which frame the capture lands on.
+    [InlineData("·")]   // U+00B7 middle dot
+    [InlineData("*")]   // U+002A ASCII asterisk
+    [InlineData("✻")]
+    [InlineData("✢")]
+    public void Claude_meter_line_is_working_for_any_leading_glyph(string glyph)
+    {
+        var text = $"● Running 1 shell command…\n {glyph} Doodling… (11s · ↓ 307 tokens)\n────\n❯\n────\n  -- INSERT --";
+        Assert.Equal(PaneState.Working, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Claude_frozen_completed_line_is_not_working()
+    {
+        // A finished turn freezes a same-glyph line ("Crunched for 54s"): past-tense,
+        // no ellipsis, no meter. It must not read as WORKING even though it starts
+        // with a spinner glyph and stays on screen at the idle input box.
+        var state = ClaudeClassifier.Classify(Fixture("claude-idle-after-work.txt"), dead: false);
+        Assert.NotEqual(PaneState.Working, state);
+        Assert.Equal(PaneState.Idle, state);
     }
 
     [Fact]

@@ -50,6 +50,32 @@ public sealed class AgentProfile
     /// </summary>
     public bool WorkingMarkerSufficient { get; set; }
 
+    /// <summary>
+    /// When true, a status line that begins (after leading whitespace) with a spinner
+    /// glyph is classified WORKING provided it also carries a "live" qualifier - an
+    /// ellipsis or a live activity meter (see <see cref="WorkingLiveEllipsisPattern"/>
+    /// / <see cref="WorkingLiveMeterPattern"/>) - or the background-sub-agents wait
+    /// phrase (<see cref="WorkingBackgroundAgentsPattern"/>). This is how the current
+    /// Claude Code build is detected now that it no longer prints a working cancel
+    /// marker: the action word is random ("Tinkering"/"Enchanting") and the glyph is
+    /// one animation frame, so neither is a stable hook alone, while a frozen
+    /// past-tense completed line (same glyph, "&lt;Word&gt; for &lt;dur&gt;") carries
+    /// none of the qualifiers and is excluded.
+    /// </summary>
+    public bool WorkingLiveSpinnerSufficient { get; set; }
+
+    /// <summary>Regex matching a live-activity ellipsis on a spinner line (either the
+    /// single glyph … or three ASCII dots). Empty disables the ellipsis qualifier.</summary>
+    public string WorkingLiveEllipsisPattern { get; set; } = "";
+
+    /// <summary>Regex matching a live activity meter on a spinner line, e.g. the
+    /// "(32s · " that opens "(32s · ↓ 1.4k tokens)". Empty disables the qualifier.</summary>
+    public string WorkingLiveMeterPattern { get; set; } = "";
+
+    /// <summary>Regex matching the background-sub-agents wait line (treated as WORKING
+    /// because the pane is busy, not awaiting the user). Empty disables it.</summary>
+    public string WorkingBackgroundAgentsPattern { get; set; } = "";
+
     /// <summary>Any one of these tokens in the status area indicates IDLE.</summary>
     public List<string> IdleHints { get; set; } = new();
 
@@ -65,6 +91,22 @@ public sealed class AgentProfile
 
     /// <summary>Matches a single spinner glyph anywhere on a line.</summary>
     public Regex CompileSpinnerGlyph() => new(SpinnerGlyphClass(), RegexOptions.Compiled);
+
+    /// <summary>Matches a spinner glyph at the start of a line (after leading whitespace).</summary>
+    public Regex CompileWorkingLineStartGlyph() =>
+        new($"^\\s*{SpinnerGlyphClass()}", RegexOptions.Compiled);
+
+    /// <summary>Compiled live-ellipsis qualifier, or null when none is configured.</summary>
+    public Regex? CompileWorkingLiveEllipsis() => CompileOrNull(WorkingLiveEllipsisPattern);
+
+    /// <summary>Compiled live-meter qualifier, or null when none is configured.</summary>
+    public Regex? CompileWorkingLiveMeter() => CompileOrNull(WorkingLiveMeterPattern);
+
+    /// <summary>Compiled background-sub-agents qualifier, or null when none is configured.</summary>
+    public Regex? CompileWorkingBackgroundAgents() => CompileOrNull(WorkingBackgroundAgentsPattern);
+
+    private static Regex? CompileOrNull(string pattern) =>
+        string.IsNullOrEmpty(pattern) ? null : new Regex(pattern, RegexOptions.Compiled);
 
     private string SpinnerGlyphClass()
     {

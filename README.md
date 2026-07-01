@@ -22,8 +22,10 @@ Each poll:
    (`copilot` / `claude`), with an optional session-name backstop.
 3. Captures each matched pane with `capture-pane -p` (read-only) and classifies it
    from its status bar using that agent's tokens (Copilot shown below; Claude Code
-   uses its own - numbered `❯ N.` permission cursor, `esc to interrupt` while
-   working, and the input-box mode line when idle):
+   uses its own - numbered `❯ N.` permission cursor, a live status line while working
+   (a `(32s · …)` activity meter or a background-sub-agents wait, matched
+   independently of the animated spinner glyph, plus a glyph + ellipsis fallback for
+   the pre-meter moment), and the input-box mode line when idle):
 
    | State | Signal at the bottom of the pane |
    |-------|----------------------------------|
@@ -128,10 +130,12 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
     {
       "id": "claude",
       "command": "claude",
-      "workingSpinnerGlyphs": "✻✽✶✷✸✹✺",
+      "workingSpinnerGlyphs": "✻✽✶✷✸✹✺✢✳∗",
       "workingWord": "",
-      "workingFooterCancelMarker": "esc to interrupt",
-      "workingMarkerSufficient": true,
+      "workingLiveSpinnerSufficient": true,
+      "workingLiveEllipsisPattern": "…|\\.\\.\\.",
+      "workingLiveMeterPattern": "\\(\\d+[smh][^)]*·",
+      "workingBackgroundAgentsPattern": "Waiting for \\d+ background agent",
       "idleHints": ["shift+tab to cycle", "? for shortcuts"]
     }
   ]
@@ -169,10 +173,12 @@ outlasts the one-shot bell, visible even when the terminal is minimised. It is
 This only ever mutates the watcher's own OS environment; it does not touch
 watched panes and does not affect the read-only guarantee.
 
-> **Claude Code tokens are provisional.** The `claude` IDLE token was verified
-> against a live pane; the WORKING/WAITING tokens are best-effort. If a Claude
-> Code build changes its status bar, run `--calibrate` against a live pane and
-> override the affected tokens in the `claude` profile above.
+> **Claude Code tokens are build-specific.** The `claude` WORKING/WAITING/IDLE
+> tokens above were verified by `--calibrate` against a live pane, but Claude Code
+> has changed its status bar before (an earlier build keyed WORKING on an
+> `esc to interrupt` marker that the current build dropped). If a future build
+> changes the status bar again, run `--calibrate` against a live pane and override
+> the affected tokens in the `claude` profile above.
 
 ## Tests
 

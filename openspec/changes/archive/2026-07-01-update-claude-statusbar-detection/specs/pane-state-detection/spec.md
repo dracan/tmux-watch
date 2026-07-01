@@ -1,8 +1,5 @@
-# pane-state-detection Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-copilot-pane-watcher. Update Purpose after archive.
-## Requirements
 ### Requirement: Detect WAITING (blocked on user)
 
 The system SHALL classify a Copilot pane as WAITING when its captured screen shows a blocking selection affordance, identified by EITHER a numbered selection cursor (a `❯` immediately followed by a digit and a period) OR a hint line containing both an up/down navigation marker (`↑/↓`) and the cancel text `esc to cancel`. Matching of the cancel text MUST be case-insensitive so a footer that capitalises it (e.g. `Esc to cancel`) still matches. Detection MUST cover both command-approval prompts and `ask_user` prompts despite their differing footer wording, and MUST NOT rely solely on approval-specific phrases such as `enter to select` or `to navigate`.
@@ -26,74 +23,6 @@ The system SHALL classify a Copilot pane as WAITING when its captured screen sho
 
 - **WHEN** a blocking prompt's footer reads `Enter to select · ↑/↓ to navigate · Esc to cancel`
 - **THEN** the pane is still classified as WAITING
-
-### Requirement: Detect WORKING
-
-The system SHALL classify a Copilot pane as WORKING when its status bar contains a working indicator: an animated spinner glyph (one of a configured set, e.g. `◎ ◉ ● ○`) immediately preceding the word `Working`.
-
-#### Scenario: Streaming work in progress
-
-- **WHEN** the status bar shows `◎ Working   esc cancel` alongside the model/context line
-- **THEN** the pane is classified as WORKING
-
-#### Scenario: Spinner animation does not change classification
-
-- **WHEN** the spinner glyph changes between consecutive captures (e.g. `◎` to `◉`) while the word `Working` remains
-- **THEN** the pane remains classified as WORKING
-
-### Requirement: Detect IDLE (turn finished)
-
-The system SHALL classify a Copilot pane as IDLE when an input box is present and the status bar shows an idle hint (a configured set of tokens such as `/ commands`, `? help`, `space hold to record`) and neither a WAITING affordance nor a WORKING indicator is present.
-
-#### Scenario: Fresh or finished session at the input box
-
-- **WHEN** the captured screen shows the input box and a status bar `/ commands · ? help · space hold to record` with no spinner and no selection footer
-- **THEN** the pane is classified as IDLE
-
-### Requirement: Detect DEAD
-
-The system SHALL classify a pane as DEAD when its foreground command no longer matches its assigned agent profile (and the pane is not re-identified by that profile's name convention or content fingerprint) or its dead flag is set.
-
-#### Scenario: Agent process exited
-
-- **WHEN** a previously matched agent pane reports a foreground command that no longer matches its profile, or a dead flag of `1`
-- **THEN** the pane is classified as DEAD
-
-### Requirement: Deterministic classification precedence
-
-The system SHALL apply classification signals in a fixed precedence — WAITING, then WORKING, then IDLE, then DEAD — so that a screen matching more than one signal resolves to a single, predictable state.
-
-#### Scenario: WAITING outranks residual scrollback
-
-- **WHEN** a captured screen contains both a WAITING selection footer and residual WORKING text from earlier in the scrollback
-- **THEN** the pane is classified as WAITING
-
-### Requirement: Version-tolerant configurable fingerprints
-
-The system SHALL treat all status-bar and footer match tokens as configurable patterns held **per agent profile** rather than hardcoded constants or a single global set, because they are specific to each agent CLI and its version.
-
-#### Scenario: Patterns overridable per agent
-
-- **WHEN** a user supplies overriding match patterns for a specific agent profile's WAITING, WORKING, or IDLE detection
-- **THEN** the system uses the supplied patterns for that profile's panes and leaves other profiles unaffected
-
-### Requirement: No false positives from non-agent TUIs
-
-The system SHALL only run state detection on panes matched to an agent profile, and other box-drawing TUIs MUST NOT be classified as WAITING.
-
-#### Scenario: lazygit is not flagged
-
-- **WHEN** a `lazygit` pane with its own bordered footer is captured
-- **THEN** it is not classified as WAITING (and is excluded from watching entirely)
-
-### Requirement: Classify using the pane's matched agent profile
-
-The system SHALL classify each watched pane using the tokens of the agent profile the pane was matched to during discovery, applying the same fixed precedence (WAITING, then WORKING, then IDLE, then DEAD) for every profile.
-
-#### Scenario: Copilot and Claude classified by their own tokens
-
-- **WHEN** a Copilot pane and a Claude pane are both watched in the same poll
-- **THEN** the Copilot pane is classified with the `copilot` profile's tokens and the Claude pane with the `claude` profile's tokens, each resolving to a single state
 
 ### Requirement: Detect Claude Code WAITING/WORKING/IDLE
 
@@ -139,6 +68,8 @@ The system SHALL detect the WAITING, WORKING, and IDLE states of a Claude Code p
 - **WHEN** the Claude spinner glyph cycles through the animated set between consecutive captures while the live line keeps its gerund + ellipsis or its meter
 - **THEN** the pane remains classified as WORKING
 
+## ADDED Requirements
+
 ### Requirement: Scan region reaches signals outside the bottom status lines
 
 The system SHALL scan a region of the captured Claude screen large enough to include WAITING and WORKING signals that no longer sit on the last few non-blank lines, because the current Claude Code build renders the live spinner line above the input box, a sub-agent panel below it, and tall selection menus whose cursor sits well above the footer. Widening the scan MUST NOT introduce false positives from earlier scrollback: WORKING matching relies on the live-only qualifiers (ellipsis or meter, or the background-agents line) so that frozen completed lines are excluded, and the fixed precedence (WAITING, then WORKING, then IDLE, then DEAD) is preserved.
@@ -157,4 +88,3 @@ The system SHALL scan a region of the captured Claude screen large enough to inc
 
 - **WHEN** the widened scan region includes an earlier frozen `✻ Crunched for 54s` line while the pane is idle at the input box
 - **THEN** the pane is classified as IDLE, not WORKING
-

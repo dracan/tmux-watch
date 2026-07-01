@@ -58,7 +58,9 @@ This repo uses OpenSpec for non-trivial changes. Changes live in
 Classification keys on per-agent status-bar tokens held in `AgentProfile`s, not
 hardcoded constants. They are agent/version-specific - verify against real captures
 (`--calibrate`) and keep fixtures in `tests/TmuxWatch.Tests/fixtures/`. Claude Code
-WORKING/WAITING tokens are currently provisional (see the README).
+tokens are build-specific and have changed before (the current build's WORKING
+detection keys on the live spinner line, not the dropped `esc to interrupt` marker);
+re-run `--calibrate` and update the `claude` profile after a Claude Code upgrade.
 
 ## Conventions
 

@@ -1,0 +1,15 @@
+● Synthetic fixture - Claude Code working, captured on an animation frame whose
+  spinner glyph is the middle dot "·" (the live spinner cycles through frames like
+  ·, *, ✻, ✢ that cannot all be enumerated). The leading glyph is NOT in the
+  configured asterisk set, so detection must rely on the glyph-independent activity
+  meter "(11s · ↓ 307 tokens)", not on the line starting with a known glyph.
+
+● Running 1 shell command…
+
+· Doodling… (11s · ↓ 307 tokens)
+
+─────────────────────────────────────────────────────────────────────────────────────── project ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

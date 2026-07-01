@@ -1,0 +1,20 @@
+● Synthetic fixture - Claude Code working while it waits on background sub-agents
+  (no real content). In this state the live line reads "<glyph> Waiting for N
+  background agent(s) to finish" with NO ellipsis and NO meter, and a sub-agent
+  panel is rendered BELOW the input box, pushing the live line far up.
+
+● 2 background agents launched (down to manage)
+   ├ Synthetic sweep one
+   └ Synthetic sweep two
+
+✻ Waiting for 2 background agents to finish
+
+─────────────────────────────────────────────────────────────────────────────────────── project ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+  ● main
+  ◯ general-purpose  Synthetic sweep one                                       1s · ↓ 1.0k tokens
+  ◯ general-purpose  Synthetic sweep two                                       0s

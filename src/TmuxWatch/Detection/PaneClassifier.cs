@@ -17,14 +17,27 @@ public sealed class PaneClassifier
     private readonly Regex _waitingCursor;
     private readonly Regex? _workingSpinner;
     private readonly Regex _spinnerGlyph;
+    private readonly Regex _workingLineStartGlyph;
+    private readonly Regex? _workingLiveEllipsis;
+    private readonly Regex? _workingLiveMeter;
+    private readonly Regex? _workingBackgroundAgents;
 
-    public PaneClassifier(AgentProfile profile, int statusLineCount = 6)
+    // Default scan depth. The current Claude Code build renders the live spinner line
+    // above the input box with a sub-agent panel below it, and tall selection menus
+    // whose cursor sits well above the footer, so the signal is no longer on the last
+    // few lines. WORKING's live-only qualifiers keep widening safe from stale
+    // scrollback (a frozen completed line carries none of them).
+    public PaneClassifier(AgentProfile profile, int statusLineCount = 16)
     {
         _profile = profile;
         _statusLineCount = statusLineCount;
         _waitingCursor = profile.CompileWaitingCursor();
         _workingSpinner = profile.CompileWorkingSpinner();
         _spinnerGlyph = profile.CompileSpinnerGlyph();
+        _workingLineStartGlyph = profile.CompileWorkingLineStartGlyph();
+        _workingLiveEllipsis = profile.CompileWorkingLiveEllipsis();
+        _workingLiveMeter = profile.CompileWorkingLiveMeter();
+        _workingBackgroundAgents = profile.CompileWorkingBackgroundAgents();
     }
 
     /// <summary>
@@ -56,11 +69,13 @@ public sealed class PaneClassifier
 
         // Footer wording varies between approval and ask_user prompts; only the
         // nav marker + cancel marker are invariant. Require both on one line so we
-        // do not match a stray "esc to cancel" appearing elsewhere.
+        // do not match a stray "esc to cancel" appearing elsewhere. The cancel text
+        // is matched case-insensitively so a capitalised footer ("Esc to cancel",
+        // as the current Claude build renders it) still matches.
         foreach (var line in statusText.Split('\n'))
         {
             if (line.Contains(_profile.WaitingFooterNavMarker, StringComparison.Ordinal) &&
-                line.Contains(_profile.WaitingFooterCancelMarker, StringComparison.Ordinal))
+                line.Contains(_profile.WaitingFooterCancelMarker, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 
@@ -73,16 +88,37 @@ public sealed class PaneClassifier
         if (_workingSpinner is not null && _workingSpinner.IsMatch(statusText))
             return true;
 
-        // Footer shows the working cancel marker. Copilot pairs it with a spinner
-        // glyph on the same line; Claude's marker ("esc to interrupt") is distinctive
-        // enough to stand alone (WorkingMarkerSufficient). WAITING is checked first,
-        // so a selection footer never reaches here.
         foreach (var line in statusText.Split('\n'))
         {
-            if (!line.Contains(_profile.WorkingFooterCancelMarker, StringComparison.Ordinal))
-                continue;
-            if (_profile.WorkingMarkerSufficient || _spinnerGlyph.IsMatch(line))
+            // Footer shows the working cancel marker. Copilot pairs it with a spinner
+            // glyph on the same line; an older Claude build's marker ("esc to
+            // interrupt") was distinctive enough to stand alone (WorkingMarkerSufficient).
+            // Skipped when the profile has no marker configured. WAITING is checked
+            // first, so a selection footer never reaches here.
+            if (_profile.WorkingFooterCancelMarker.Length > 0 &&
+                line.Contains(_profile.WorkingFooterCancelMarker, StringComparison.Ordinal) &&
+                (_profile.WorkingMarkerSufficient || _spinnerGlyph.IsMatch(line)))
                 return true;
+
+            // Current Claude build: a live spinner status line. The activity meter
+            // ("(11s · ↓ 307 tokens)") and the background-sub-agents wait are
+            // distinctive enough to stand alone, independent of the leading glyph -
+            // which matters because the spinner animates through frames we cannot
+            // fully enumerate (·, *, ✻, ✢ …), so anchoring on a glyph whitelist drops
+            // ~a quarter of frames and flickers the pane to IDLE. The bare
+            // gerund+ellipsis moment (before the meter appears) still needs the
+            // spinner-glyph anchor so a truncated table cell or prose line that merely
+            // contains an ellipsis is not mistaken for work. A frozen, past-tense
+            // completed line ("<Word> for <dur>") carries none of these qualifiers.
+            if (_profile.WorkingLiveSpinnerSufficient)
+            {
+                if ((_workingLiveMeter?.IsMatch(line) ?? false) ||
+                    (_workingBackgroundAgents?.IsMatch(line) ?? false))
+                    return true;
+                if (_workingLineStartGlyph.IsMatch(line) &&
+                    (_workingLiveEllipsis?.IsMatch(line) ?? false))
+                    return true;
+            }
         }
 
         return false;
