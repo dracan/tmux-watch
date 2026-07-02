@@ -1,0 +1,6 @@
+{
+  // tmux-watch runtime config. Passed via --config (see go.ps1).
+  "pointerSignal": {
+    "enabled": true
+  }
+}

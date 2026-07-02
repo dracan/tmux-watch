@@ -1,2 +1,2 @@
 cls
-dn run --project .\src\TmuxWatch\
+dn run --project .\src\TmuxWatch\ -- --config (Join-Path $PSScriptRoot 'config.json')
