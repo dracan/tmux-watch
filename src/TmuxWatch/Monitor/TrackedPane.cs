@@ -27,6 +27,11 @@ internal sealed class TrackedPane
     public DateTimeOffset EnteredAt { get; set; }
     public bool AttentionOutstanding { get; set; }
 
+    /// <summary>Consecutive enumerations this pane has been absent from. Reset to 0
+    /// whenever it is seen; used to debounce transient disappearances so a pane is not
+    /// dropped and re-added as "first sight" on a single empty/partial enumeration.</summary>
+    public int MissedEnumerations { get; set; }
+
     public TrackedPaneView ToView() =>
         new(Pane, State, EnteredAt, AttentionOutstanding);
 }

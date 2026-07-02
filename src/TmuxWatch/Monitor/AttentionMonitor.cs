@@ -26,6 +26,7 @@ public sealed class AttentionMonitor
     private readonly INotifier _notifier;
     private readonly TimeProvider _clock;
     private readonly IReadOnlyDictionary<string, PaneClassifier> _classifiers;
+    private readonly int _missedEnumerationsBeforeDrop;
 
     private readonly Dictionary<string, TrackedPane> _tracked = new();
 
@@ -40,6 +41,7 @@ public sealed class AttentionMonitor
         _tmux = tmux;
         _notifier = notifier;
         _clock = clock ?? TimeProvider.System;
+        _missedEnumerationsBeforeDrop = Math.Max(1, cfg.MissedEnumerationsBeforeDrop);
         _classifiers = cfg.ResolveAgents()
             .ToDictionary(a => a.Id, a => new PaneClassifier(a, cfg.StatusLineCount));
     }
@@ -79,6 +81,7 @@ public sealed class AttentionMonitor
             }
 
             tracked.Pane = pane;
+            tracked.MissedEnumerations = 0;   // seen this tick: reset the absence debounce
 
             // A capture that yields no recognizable signal (a failed, empty, or
             // mid-redraw capture under host load) is "no new information", not a real
@@ -108,9 +111,18 @@ public sealed class AttentionMonitor
             }
         }
 
-        // Drop panes that disappeared (resilience: pane vanished mid-watch).
+        // Debounce disappearance: a pane missing from a single enumeration is retained
+        // (state and in-state timer intact) rather than dropped. A transient empty or
+        // partial `lsp` result under host load would otherwise wipe every tracked pane
+        // and re-add them all as "first sight" next tick - resetting every timer and
+        // re-firing the WAITING/DONE chime. Only drop once a pane has been absent for
+        // MissedEnumerationsBeforeDrop consecutive ticks (a genuine close).
         foreach (var goneId in _tracked.Keys.Where(k => !seen.Contains(k)).ToList())
-            _tracked.Remove(goneId);
+        {
+            var tracked = _tracked[goneId];
+            if (++tracked.MissedEnumerations >= _missedEnumerationsBeforeDrop)
+                _tracked.Remove(goneId);
+        }
 
         return new MonitorSnapshot(SnapshotViews(), events, now, null);
     }

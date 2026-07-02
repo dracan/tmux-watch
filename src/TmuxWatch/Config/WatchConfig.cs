@@ -22,6 +22,17 @@ public sealed class WatchConfig
     /// box (with a sub-agent panel below) and tall selection-menu cursors.</summary>
     public int StatusLineCount { get; set; } = 16;
 
+    /// <summary>
+    /// How many consecutive enumerations a tracked pane may be absent from before it
+    /// is dropped. A transient empty or partial <c>lsp</c> result (host under load)
+    /// must not wipe every tracked pane and re-add them as "first sight" next tick -
+    /// that would reset every in-state timer and re-fire the WAITING/DONE chime for
+    /// panes that never changed. Retaining an absent pane for a few ticks bridges the
+    /// gap; a genuinely closed pane still drops once the threshold is crossed. Minimum
+    /// 1 (drop on the first absence, the pre-debounce behaviour).
+    /// </summary>
+    public int MissedEnumerationsBeforeDrop { get; set; } = 3;
+
     /// <summary>Notification channel: "bell", "none" (extendable, e.g. "toast").</summary>
     public string NotificationChannel { get; set; } = "bell";
 

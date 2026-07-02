@@ -266,7 +266,7 @@ public class AttentionMonitorTests
     }
 
     [Fact]
-    public void Disappearing_pane_is_dropped()
+    public void Disappearing_pane_is_dropped_after_threshold()
     {
         var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
         fake.Captures["%1"] = Working;
@@ -274,10 +274,66 @@ public class AttentionMonitorTests
         monitor.Tick();
 
         fake.ListOutput = "";                  // pane gone
-        var snap = monitor.Tick();
+
+        // Default threshold is 3 consecutive absences: retained for the first two.
+        Assert.Single(monitor.Tick().Panes);
+        Assert.Single(monitor.Tick().Panes);
+        var snap = monitor.Tick();             // third absence: dropped
 
         Assert.Empty(snap.Panes);
         Assert.Null(snap.Error);
+    }
+
+    [Fact]
+    public void Transient_enumeration_gap_holds_all_panes_without_re_chiming()
+    {
+        // The reported bug: a single empty `lsp` result (host under load) must not wipe
+        // every tracked pane and re-add them as "first sight" next tick - which reset
+        // all in-state timers and re-fired the WAITING chime for unchanged panes.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Waiting;
+        var monitor = Build(fake, out var clock);
+
+        var first = monitor.Tick();            // first sight: waiting -> one chime
+        Assert.Single(first.Events);
+        var enteredAt = Assert.Single(first.Panes).EnteredAt;
+
+        clock.Advance(TimeSpan.FromHours(3));
+        fake.ListOutput = "";                  // transient empty enumeration
+        var gap = monitor.Tick();
+
+        var held = Assert.Single(gap.Panes);   // pane retained, not dropped
+        Assert.Equal(PaneState.Waiting, held.State);
+        Assert.Equal(enteredAt, held.EnteredAt);   // timer NOT reset
+        Assert.Empty(gap.Events);                  // no chime
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.ListOutput = "%1|s|0|0|copilot|0"; // enumeration recovers
+        var recovered = monitor.Tick();
+
+        var view = Assert.Single(recovered.Panes);
+        Assert.Equal(PaneState.Waiting, view.State);
+        Assert.Equal(enteredAt, view.EnteredAt);   // still the original timer
+        Assert.Empty(recovered.Events);            // no second chime
+    }
+
+    [Fact]
+    public void Reappearing_before_threshold_resets_absence_debounce()
+    {
+        // A pane that blips out then returns before the drop threshold must fully
+        // reset its absence count, so a later single blip is again tolerated.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Idle;
+        var monitor = Build(fake, out _);
+        monitor.Tick();
+
+        fake.ListOutput = "";                  // absence 1 of 3
+        monitor.Tick();
+        fake.ListOutput = "%1|s|0|0|copilot|0"; // seen again -> count reset
+        monitor.Tick();
+
+        fake.ListOutput = "";                  // absence 1 of 3 again, still retained
+        Assert.Single(monitor.Tick().Panes);
     }
 
     [Fact]
