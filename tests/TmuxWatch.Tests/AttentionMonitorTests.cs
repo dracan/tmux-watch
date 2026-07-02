@@ -197,6 +197,60 @@ public class AttentionMonitorTests
     }
 
     [Fact]
+    public void Transient_capture_failure_holds_state_and_timer()
+    {
+        // A pane WAITING for hours. A single failed/empty capture (host under load)
+        // must not flap it to Unknown: the in-state timer stays put and no second
+        // chime fires when the capture recovers.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Waiting;
+        var monitor = Build(fake, out var clock);
+
+        var first = monitor.Tick();                // first sight: waiting -> one event
+        Assert.Single(first.Events);
+        var enteredAt = Assert.Single(first.Panes).EnteredAt;
+
+        clock.Advance(TimeSpan.FromHours(2));
+        fake.Captures["%1"] = "";                  // transient empty capture -> Unknown
+        var blip = monitor.Tick();
+
+        var heldView = Assert.Single(blip.Panes);
+        Assert.Equal(PaneState.Waiting, heldView.State);   // state held
+        Assert.Equal(enteredAt, heldView.EnteredAt);       // timer NOT reset
+        Assert.Empty(blip.Events);                         // no chime
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Waiting;             // capture recovers
+        var recovered = monitor.Tick();
+
+        var view = Assert.Single(recovered.Panes);
+        Assert.Equal(PaneState.Waiting, view.State);
+        Assert.Equal(enteredAt, view.EnteredAt);           // still the original timer
+        Assert.Empty(recovered.Events);                    // no second chime
+    }
+
+    [Fact]
+    public void Transient_capture_failure_does_not_miss_done()
+    {
+        // WORKING -> (capture blip) -> IDLE must still register as a completed turn:
+        // holding the prior WORKING state through the blip preserves DONE detection.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Working;
+        var monitor = Build(fake, out _);
+
+        monitor.Tick();                            // working
+        fake.Captures["%1"] = "";                  // blip -> Unknown, held as Working
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+
+        fake.Captures["%1"] = Idle;                // now genuinely idle
+        var done = monitor.Tick();
+
+        Assert.Equal(PaneState.Done, Assert.Single(done.Panes).State);
+        Assert.Single(done.Events);
+        Assert.Equal(AttentionKind.EnteredDone, done.Events[0].Kind);
+    }
+
+    [Fact]
     public void Classifies_pane_when_command_has_exe_extension()
     {
         // Windows reports "copilot.exe"; the monitor must still classify the

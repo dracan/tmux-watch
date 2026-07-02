@@ -78,6 +78,18 @@ public sealed class AttentionMonitor
                 continue;
             }
 
+            tracked.Pane = pane;
+
+            // A capture that yields no recognizable signal (a failed, empty, or
+            // mid-redraw capture under host load) is "no new information", not a real
+            // transition. Hold the pane's established state and in-state timer rather
+            // than flapping it to Unknown - which would reset every row's timer and, on
+            // recovery, re-fire the WAITING/DONE chime for panes that never changed. It
+            // would also break DONE detection by erasing the prior WORKING fact. DEAD
+            // comes from the liveness flag (never Unknown), so it still propagates.
+            if (classified == PaneState.Unknown)
+                continue;
+
             // Derive DONE (monitor-only; the classifier never emits it): a classified
             // IDLE whose prior state was WORKING is a completed turn, and a pane already
             // in DONE stays DONE while it keeps classifying IDLE. Any other path into
@@ -87,7 +99,6 @@ public sealed class AttentionMonitor
                 tracked.State is PaneState.Working or PaneState.Done)
                 state = PaneState.Done;
 
-            tracked.Pane = pane;
             if (tracked.State != state)
             {
                 var previous = tracked.State;
