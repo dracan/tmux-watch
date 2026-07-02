@@ -20,23 +20,35 @@ public class PointerSignalTests
     // --- Config parsing (task 1.3) ---
 
     [Fact]
-    public void Pointer_signal_is_off_by_default()
+    public void Pointer_signal_is_on_by_default()
     {
         var cfg = new WatchConfig();
-        Assert.False(cfg.PointerSignal.Enabled);
+        Assert.True(cfg.PointerSignal.Enabled);
         Assert.Equal(new[] { "arrow", "ibeam" }, cfg.PointerSignal.Shapes);
     }
 
     [Fact]
-    public void Omitting_pointer_signal_in_json_keeps_defaults_off()
+    public void Omitting_pointer_signal_in_json_keeps_defaults()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, "{ \"pollIntervalSeconds\": 3 }");
         try
         {
             var cfg = WatchConfig.Load(path);
-            Assert.False(cfg.PointerSignal.Enabled);
+            Assert.True(cfg.PointerSignal.Enabled);
             Assert.Equal("assets/waiting-cursor.cur", cfg.PointerSignal.WaitingCursorFile);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Pointer_signal_can_be_disabled_in_json()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, "{ \"pointerSignal\": { \"enabled\": false } }");
+        try
+        {
+            Assert.False(WatchConfig.Load(path).PointerSignal.Enabled);
         }
         finally { File.Delete(path); }
     }

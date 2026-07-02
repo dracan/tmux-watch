@@ -1,5 +1,6 @@
 {
-  // tmux-watch runtime config. Passed via --config (see go.ps1).
+  // tmux-watch runtime config, passed via --config (see go.sh / go.ps1).
+  // The pointer signal is on by default; set "enabled": false to turn it off.
   "pointerSignal": {
     "enabled": true
   }

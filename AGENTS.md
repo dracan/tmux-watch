@@ -38,12 +38,13 @@ tmux-watch MUST NEVER send input to a watched pane. The tmux access layer
 that injects input) must never be added or invoked. The only state change the tool
 may cause is moving the *watcher's own* client focus. Preserve this by construction.
 
-The optional **pointer signal** (`src/TmuxWatch/Pointer/`) recolours the OS mouse
-pointer while a pane waits. This is a *different* boundary from the pane guarantee
-above: it never touches a watched pane, but it does mutate the watcher's own OS
-environment (global desktop pointer). Keep it that way - it must stay opt-in
-(default off), crash-safe (restore on exit and unconditionally on startup), and a
-no-op on unsupported hosts; it must never become a channel that reaches a pane.
+The **pointer signal** (`src/TmuxWatch/Pointer/`) recolours the OS mouse pointer
+while a pane waits. This is a *different* boundary from the pane guarantee above:
+it never touches a watched pane, but it does mutate the watcher's own OS
+environment (global desktop pointer). It is on by default (disable via
+`pointerSignal.enabled` in config) and must stay crash-safe (restore on exit and
+unconditionally on startup) and a no-op on unsupported hosts; it must never become
+a channel that reaches a pane.
 
 ## OpenSpec workflow
 

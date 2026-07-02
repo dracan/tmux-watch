@@ -1,15 +1,16 @@
 namespace TmuxWatch.Config;
 
 /// <summary>
-/// Opt-in configuration for the level-triggered pointer signal. When
-/// <see cref="Enabled"/> is false (the default) tmux-watch never touches the OS
-/// pointer. The pointer change is an OS call, not a terminal escape sequence, so it
-/// behaves identically inside or outside tmux/PSMUX.
+/// Configuration for the level-triggered pointer signal. On by default (a no-op on
+/// hosts with no path to the Windows pointer); set <see cref="Enabled"/> to false to
+/// keep tmux-watch away from the OS pointer entirely. The pointer change is an OS
+/// call, not a terminal escape sequence, so it behaves identically inside or outside
+/// tmux/PSMUX.
 /// </summary>
 public sealed class PointerSignalConfig
 {
-    /// <summary>Master opt-in. Default off; the signal is a no-op until enabled.</summary>
-    public bool Enabled { get; set; } = false;
+    /// <summary>Master switch. Default on; set false to disable the signal.</summary>
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Path to the cursor asset shown while any pane is WAITING. Relative paths are
