@@ -275,13 +275,22 @@ public class AttentionMonitorTests
 
         fake.ListOutput = "";                  // pane gone
 
-        // Default threshold is 3 consecutive absences: retained for the first two.
-        Assert.Single(monitor.Tick().Panes);
-        Assert.Single(monitor.Tick().Panes);
-        var snap = monitor.Tick();             // third absence: dropped
-
+        // An absent pane is hidden immediately (no phantom "needs you" row with a
+        // dead jump target), while its entry is retained internally for the
+        // default threshold of 3 consecutive absences.
+        Assert.Empty(monitor.Tick().Panes);
+        Assert.Empty(monitor.Tick().Panes);
+        var snap = monitor.Tick();             // third absence: entry dropped
         Assert.Empty(snap.Panes);
         Assert.Null(snap.Error);
+
+        // Proof the entry is gone: the id returning idle is first sight (IDLE),
+        // not a held WORKING -> IDLE completion (DONE).
+        fake.ListOutput = "%1|s|0|0|copilot|0";
+        fake.Captures["%1"] = Idle;
+        var back = monitor.Tick();
+        Assert.Equal(PaneState.Idle, Assert.Single(back.Panes).State);
+        Assert.Empty(back.Events);
     }
 
     [Fact]
@@ -302,10 +311,8 @@ public class AttentionMonitorTests
         fake.ListOutput = "";                  // transient empty enumeration
         var gap = monitor.Tick();
 
-        var held = Assert.Single(gap.Panes);   // pane retained, not dropped
-        Assert.Equal(PaneState.Waiting, held.State);
-        Assert.Equal(enteredAt, held.EnteredAt);   // timer NOT reset
-        Assert.Empty(gap.Events);                  // no chime
+        Assert.Empty(gap.Panes);               // hidden while absent (never a phantom row)
+        Assert.Empty(gap.Events);              // no chime
 
         clock.Advance(TimeSpan.FromSeconds(2));
         fake.ListOutput = "%1|s|0|0|copilot|0"; // enumeration recovers
@@ -321,19 +328,86 @@ public class AttentionMonitorTests
     public void Reappearing_before_threshold_resets_absence_debounce()
     {
         // A pane that blips out then returns before the drop threshold must fully
-        // reset its absence count, so a later single blip is again tolerated.
+        // reset its absence count: two later absences (which would cross the
+        // threshold of 3 if the earlier blip had kept counting) must still be
+        // tolerated as a transient gap, not end in a drop and a first-sight re-chime.
         var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
-        fake.Captures["%1"] = Idle;
-        var monitor = Build(fake, out _);
-        monitor.Tick();
+        fake.Captures["%1"] = Waiting;
+        var monitor = Build(fake, out var clock);
+        var first = monitor.Tick();             // first sight: one WAITING chime
+        Assert.Single(first.Events);
+        var enteredAt = Assert.Single(first.Panes).EnteredAt;
 
-        fake.ListOutput = "";                  // absence 1 of 3
+        fake.ListOutput = "";                   // absence 1 of 3
         monitor.Tick();
         fake.ListOutput = "%1|s|0|0|copilot|0"; // seen again -> count reset
         monitor.Tick();
 
-        fake.ListOutput = "";                  // absence 1 of 3 again, still retained
-        Assert.Single(monitor.Tick().Panes);
+        fake.ListOutput = "";                   // absences 1 and 2 of 3 (3 and 4 unreset)
+        monitor.Tick();
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.ListOutput = "%1|s|0|0|copilot|0"; // recovers: must still be the same entry
+        var back = monitor.Tick();
+
+        var view = Assert.Single(back.Panes);
+        Assert.Equal(enteredAt, view.EnteredAt); // original timer survived both blips
+        Assert.Empty(back.Events);               // a drop + re-add would have re-chimed
+    }
+
+    [Fact]
+    public void Persistent_unknown_surfaces_after_stale_threshold()
+    {
+        // The Unknown-hold is bounded: a pane that stops classifying entirely (token
+        // drift after an agent upgrade, copy-mode, an unrecognized screen) must
+        // eventually surface Unknown instead of freezing its stale state forever.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0" };
+        fake.Captures["%1"] = Working;
+        var monitor = Build(fake, out var clock,
+            new WatchConfig { UnknownCapturesBeforeStale = 3 });
+        monitor.Tick();                        // working
+
+        fake.Captures["%1"] = "";              // classifies Unknown from here on
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        var stale = monitor.Tick();            // third consecutive Unknown: surfaced
+        var view = Assert.Single(stale.Panes);
+        Assert.Equal(PaneState.Unknown, view.State);
+        Assert.False(view.AttentionOutstanding);
+
+        fake.Captures["%1"] = Working;         // classification recovers
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+        fake.Captures["%1"] = "";              // a fresh single blip is held again
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+    }
+
+    [Fact]
+    public void Reused_pane_id_with_different_pid_is_first_sight_not_done()
+    {
+        // A tmux server restart inside the absence-debounce window can hand a
+        // brand-new pane an old id (%-ids restart at %0). The pane pid disambiguates:
+        // the newcomer must not inherit the old pane's WORKING history and be
+        // promoted to a false DONE with a phantom "finished" chime.
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|copilot|0|w|/p|0|0|100" };
+        fake.Captures["%1"] = Working;
+        var monitor = Build(fake, out _);
+        monitor.Tick();                        // working, pid 100
+
+        fake.ListOutput = "";                  // server gone for one tick
+        monitor.Tick();
+
+        fake.ListOutput = "%1|s|0|0|copilot|0|w|/p|0|0|200"; // same id, new process
+        fake.Captures["%1"] = Idle;
+        var snap = monitor.Tick();
+
+        var view = Assert.Single(snap.Panes);
+        Assert.Equal(PaneState.Idle, view.State);
+        Assert.Empty(snap.Events);
     }
 
     [Fact]

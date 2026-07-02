@@ -33,12 +33,25 @@ public sealed class WatchConfig
     /// </summary>
     public int MissedEnumerationsBeforeDrop { get; set; } = 3;
 
+    /// <summary>
+    /// How many consecutive Unknown classifications a pane may accumulate before its
+    /// held state goes stale and Unknown is surfaced. Holding through a handful of
+    /// Unknowns bridges failed/empty/mid-redraw captures without flapping timers or
+    /// re-firing chimes, but the hold must be bounded: a pane that classifies Unknown
+    /// forever (e.g. profile tokens drifted after an agent upgrade, or the pane sits
+    /// in copy-mode) must eventually show Unknown so the lost classification is
+    /// visible rather than masked by a frozen stale state. Minimum 1 (surface on the
+    /// first Unknown, the pre-hold behaviour). Default 15 ticks (~30s at the default
+    /// 2s poll).
+    /// </summary>
+    public int UnknownCapturesBeforeStale { get; set; } = 15;
+
     /// <summary>Notification channel: "bell", "none" (extendable, e.g. "toast").</summary>
     public string NotificationChannel { get; set; } = "bell";
 
     /// <summary>
-    /// Opt-in pointer signal: recolour the OS mouse pointer while any pane is WAITING.
-    /// Default off. See <see cref="PointerSignalConfig"/>.
+    /// Pointer signal: recolour the OS mouse pointer while any pane is WAITING or
+    /// DONE. Default on; disable via config. See <see cref="PointerSignalConfig"/>.
     /// </summary>
     public PointerSignalConfig PointerSignal { get; set; } = new();
 

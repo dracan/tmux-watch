@@ -18,7 +18,7 @@ public sealed class PaneDiscovery
 {
     // Field order must match Parse(); '|' separates fields.
     public const string Format =
-        "#{pane_id}|#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_dead}|#{window_name}|#{pane_current_path}|#{window_active}|#{pane_active}";
+        "#{pane_id}|#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_dead}|#{window_name}|#{pane_current_path}|#{window_active}|#{pane_active}|#{pane_pid}";
 
     private readonly ITmuxClient _tmux;
     private readonly IReadOnlyList<AgentProfile> _agents;
@@ -106,7 +106,10 @@ public sealed class PaneDiscovery
         var currentPath = parts.Length > 7 ? parts[7].Trim() : "";
         var windowActive = parts.Length > 8 && parts[8].Trim() == "1";
         var paneActive = parts.Length > 9 && parts[9].Trim() == "1";
+        var pid = 0;
+        if (parts.Length > 10)
+            _ = int.TryParse(parts[10].Trim(), out pid);
 
-        return new Pane(id, parts[1], win, pane, parts[4].Trim(), dead, windowName, currentPath, windowActive, paneActive);
+        return new Pane(id, parts[1], win, pane, parts[4].Trim(), dead, windowName, currentPath, windowActive, paneActive, pid);
     }
 }

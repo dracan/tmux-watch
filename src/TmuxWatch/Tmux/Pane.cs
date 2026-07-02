@@ -2,7 +2,8 @@ namespace TmuxWatch.Tmux;
 
 /// <summary>
 /// A single tmux pane as reported by <c>lsp -a -F</c>. <see cref="Id"/> (e.g. "%10")
-/// is the stable key used across polls.
+/// is the stable key used across polls; <see cref="Pid"/> (the pane's root process)
+/// disambiguates a reused id, e.g. after a tmux server restart.
 /// </summary>
 public sealed record Pane(
     string Id,
@@ -15,6 +16,7 @@ public sealed record Pane(
     string CurrentPath = "",
     bool WindowActive = false,
     bool PaneActive = false,
+    int Pid = 0,
     string AgentId = "")
 {
     // AgentId is empty as parsed from tmux; discovery stamps it with the id of the

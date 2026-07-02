@@ -32,6 +32,11 @@ internal sealed class TrackedPane
     /// dropped and re-added as "first sight" on a single empty/partial enumeration.</summary>
     public int MissedEnumerations { get; set; }
 
+    /// <summary>Consecutive captures that classified Unknown. Reset to 0 on any
+    /// recognizable classification; once it reaches the configured stale threshold the
+    /// held state is abandoned and Unknown is surfaced.</summary>
+    public int ConsecutiveUnknowns { get; set; }
+
     public TrackedPaneView ToView() =>
         new(Pane, State, EnteredAt, AttentionOutstanding);
 }
