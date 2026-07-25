@@ -18,6 +18,7 @@ public sealed class TmuxRunner : ITmuxClient
         "display-message", "display",
         "switch-client", "switchc",
         "select-window", "selectw",
+        "select-pane", "selectp",
     };
 
     private readonly string _exe;
@@ -35,6 +36,9 @@ public sealed class TmuxRunner : ITmuxClient
 
     public TmuxResult SelectWindow(string windowTarget) =>
         Run("select-window", "-t", windowTarget);
+
+    public TmuxResult SelectPane(string paneId) =>
+        Run("select-pane", "-t", paneId);
 
     public TmuxResult Run(params string[] args)
     {

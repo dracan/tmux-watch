@@ -17,15 +17,30 @@ public sealed class FakeTmuxClient : ITmuxClient
 
     public List<string> SwitchedSessions { get; } = new();
     public List<string> SelectedWindows { get; } = new();
+    public List<string> SelectedPanes { get; } = new();
 
-    public TmuxResult ListPanesRaw(string format) =>
-        Started ? new TmuxResult(true, ExitCode, ListOutput, ErrorMessage)
-                : TmuxResult.NotStarted(ErrorMessage);
+    /// <summary>Pane ids the fake was asked to capture, so tests can assert that the
+    /// non-agent inventory is never captured.</summary>
+    public List<string> CapturedPanes { get; } = new();
 
-    public TmuxResult CapturePane(string paneId) =>
-        Captures.TryGetValue(paneId, out var text)
+    /// <summary>Enumerations performed, so tests can assert the inventory rides along on
+    /// the single existing call rather than costing a second one.</summary>
+    public int ListCalls { get; private set; }
+
+    public TmuxResult ListPanesRaw(string format)
+    {
+        ListCalls++;
+        return Started ? new TmuxResult(true, ExitCode, ListOutput, ErrorMessage)
+                       : TmuxResult.NotStarted(ErrorMessage);
+    }
+
+    public TmuxResult CapturePane(string paneId)
+    {
+        CapturedPanes.Add(paneId);
+        return Captures.TryGetValue(paneId, out var text)
             ? new TmuxResult(true, 0, text, "")
             : new TmuxResult(true, 0, "", "");
+    }
 
     public TmuxResult SwitchClient(string sessionName)
     {
@@ -36,6 +51,12 @@ public sealed class FakeTmuxClient : ITmuxClient
     public TmuxResult SelectWindow(string windowTarget)
     {
         SelectedWindows.Add(windowTarget);
+        return new TmuxResult(true, 0, "", "");
+    }
+
+    public TmuxResult SelectPane(string paneId)
+    {
+        SelectedPanes.Add(paneId);
         return new TmuxResult(true, 0, "", "");
     }
 }

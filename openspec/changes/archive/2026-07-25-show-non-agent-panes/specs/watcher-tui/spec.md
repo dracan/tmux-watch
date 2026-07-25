@@ -1,112 +1,4 @@
-# watcher-tui Specification
-
-## Purpose
-TBD - created by archiving change add-copilot-pane-watcher. Update Purpose after archive.
-## Requirements
-### Requirement: Live status view of watched panes
-
-The system SHALL present a live Spectre.Console view listing each watched agent pane with its **matched agent**, session and window location, current classified state shown via a distinct visual indicator, and its time-in-state. The DONE state SHALL be rendered with its own distinct indicator, separate from IDLE.
-
-#### Scenario: States rendered with indicators
-
-- **WHEN** watched panes are in differing states (WAITING, DONE, WORKING, IDLE, DEAD)
-- **THEN** the view shows each pane with a state-specific indicator and updates as states change
-
-#### Scenario: DONE is visually distinct from IDLE
-
-- **WHEN** one pane is DONE and another is IDLE
-- **THEN** the two rows show different state indicators
-
-#### Scenario: Mixed agents are distinguishable
-
-- **WHEN** both Copilot and Claude Code panes are being watched
-- **THEN** each row shows which agent the pane is, so the two agents' sessions are told apart in one view
-
-#### Scenario: View refreshes with monitor
-
-- **WHEN** the monitor reclassifies panes on a poll
-- **THEN** the live view reflects the updated states without requiring user interaction
-
-### Requirement: Prioritise panes needing attention
-
-The system SHALL order or highlight panes so that those needing the user are surfaced ahead of the rest, using the priority order WAITING, DONE, WORKING, IDLE, UNKNOWN, DEAD. Both WAITING and DONE are "needs you" states and SHALL sort above WORKING and IDLE.
-
-#### Scenario: WAITING surfaced first
-
-- **WHEN** at least one pane is WAITING and others are DONE, WORKING, or IDLE
-- **THEN** the WAITING pane(s) appear at the top of the view, above the DONE pane(s)
-
-#### Scenario: DONE surfaced above working and idle
-
-- **WHEN** a pane is DONE and others are WORKING or IDLE, with none WAITING
-- **THEN** the DONE pane(s) appear at the top of the view, above WORKING and IDLE
-
-### Requirement: Switch to a selected pane
-
-The system SHALL provide keyboard actions that switch the attached terminal client to a user-selected pane using multiplexer client-control verbs (`switch-client`, `select-window`, and `select-pane`). The selected pane SHALL be brought into focus precisely, so that a pane sharing a window with other panes is landed on rather than deferring to whichever pane that window last had active. The switch action SHALL be available both by pressing the row's address key and by pressing Enter on the highlighted row, and SHALL work for agent and non-agent rows alike. Switching to a DONE pane SHALL acknowledge it, returning it to IDLE.
-
-#### Scenario: Jump to a waiting pane
-
-- **WHEN** the user selects a WAITING pane and triggers the switch action
-- **THEN** the system issues the multiplexer client-control command(s) to bring that pane's session, window, and pane into focus
-
-#### Scenario: Enter switches to the highlighted row
-
-- **WHEN** the user presses Enter while a row is highlighted
-- **THEN** the system switches to that row's pane
-
-#### Scenario: Split window lands on the named pane
-
-- **WHEN** the selected row names a pane in a window containing several panes, and that pane is not the window's currently active pane
-- **THEN** the system selects that specific pane, not merely its window
-
-#### Scenario: Jump to a non-agent pane
-
-- **WHEN** the user selects a non-agent row and triggers the switch action
-- **THEN** the system brings that pane into focus with no capture, classification, or acknowledgement performed
-
-#### Scenario: Jump to a DONE pane acknowledges it
-
-- **WHEN** the user selects a DONE pane and triggers the switch action
-- **THEN** the system brings that pane into focus and the pane returns to IDLE (acknowledged)
-
-### Requirement: Read-only guarantee toward watched panes
-
-The system MUST NOT send keystrokes or input into any watched agent pane. The only multiplexer state changes it may cause are focus changes: attaching or selecting the client's own session and window (`switch-client`, `select-window`) and selecting the active pane within a window (`select-pane`). Pane selection is permitted despite being server-visible state observable by other clients, because it is required to land on a specific pane and injects no input. No input-injecting verb (notably `send-keys`) SHALL be present in the permitted verb set, and any attempt to invoke one SHALL be rejected.
-
-#### Scenario: No input is sent to an agent pane
-
-- **WHEN** the user interacts with the watcher TUI in any way
-- **THEN** the system never issues `send-keys` (or any input-injecting verb) to a watched agent pane
-
-#### Scenario: Input-injecting verbs stay rejected
-
-- **WHEN** any code path attempts to invoke `send-keys` through the multiplexer access layer
-- **THEN** the call is rejected rather than executed
-
-#### Scenario: Pane selection is permitted
-
-- **WHEN** the user switches to a row whose pane is not its window's active pane
-- **THEN** the system issues `select-pane` for that pane and no other state-changing verb
-
-### Requirement: Acknowledge a DONE pane without switching
-
-The system SHALL provide a keyboard action (the `a` key) that acknowledges the **highlighted** row when it is a DONE agent pane, returning it to IDLE and clearing its contribution to the DONE cue, without switching the client to that pane. Acknowledgement SHALL be driven by the keystroke, so a pane that already holds focus when it enters DONE is not auto-acknowledged. The action SHALL be a no-op when the highlighted row is not a DONE agent pane, including when it is a non-agent row.
-
-#### Scenario: Ack key clears the highlighted DONE pane
-
-- **WHEN** the highlighted row is a DONE pane and the user presses `a`
-- **THEN** the pane returns to IDLE, its DONE cue clears, and the client focus does not move
-
-#### Scenario: Ack key on a non-DONE pane does nothing
-
-- **WHEN** the highlighted row is an agent pane that is not DONE and the user presses `a`
-- **THEN** no state change occurs
-
-#### Scenario: Ack key on a non-agent row does nothing
-
-- **WHEN** the highlighted row is a non-agent pane and the user presses `a`
-- **THEN** no state change occurs
+## ADDED Requirements
 
 ### Requirement: Other panes table
 
@@ -282,3 +174,71 @@ window name.
 - **WHEN** the user runs the watcher with the one-shot flag while agent and non-agent panes exist
 - **THEN** the printed output contains a line for each agent pane with its classified state and a line for each non-agent pane with its foreground process
 
+## MODIFIED Requirements
+
+### Requirement: Switch to a selected pane
+
+The system SHALL provide keyboard actions that switch the attached terminal client to a user-selected pane using multiplexer client-control verbs (`switch-client`, `select-window`, and `select-pane`). The selected pane SHALL be brought into focus precisely, so that a pane sharing a window with other panes is landed on rather than deferring to whichever pane that window last had active. The switch action SHALL be available both by pressing the row's address key and by pressing Enter on the highlighted row, and SHALL work for agent and non-agent rows alike. Switching to a DONE pane SHALL acknowledge it, returning it to IDLE.
+
+#### Scenario: Jump to a waiting pane
+
+- **WHEN** the user selects a WAITING pane and triggers the switch action
+- **THEN** the system issues the multiplexer client-control command(s) to bring that pane's session, window, and pane into focus
+
+#### Scenario: Enter switches to the highlighted row
+
+- **WHEN** the user presses Enter while a row is highlighted
+- **THEN** the system switches to that row's pane
+
+#### Scenario: Split window lands on the named pane
+
+- **WHEN** the selected row names a pane in a window containing several panes, and that pane is not the window's currently active pane
+- **THEN** the system selects that specific pane, not merely its window
+
+#### Scenario: Jump to a non-agent pane
+
+- **WHEN** the user selects a non-agent row and triggers the switch action
+- **THEN** the system brings that pane into focus with no capture, classification, or acknowledgement performed
+
+#### Scenario: Jump to a DONE pane acknowledges it
+
+- **WHEN** the user selects a DONE pane and triggers the switch action
+- **THEN** the system brings that pane into focus and the pane returns to IDLE (acknowledged)
+
+### Requirement: Read-only guarantee toward watched panes
+
+The system MUST NOT send keystrokes or input into any watched agent pane. The only multiplexer state changes it may cause are focus changes: attaching or selecting the client's own session and window (`switch-client`, `select-window`) and selecting the active pane within a window (`select-pane`). Pane selection is permitted despite being server-visible state observable by other clients, because it is required to land on a specific pane and injects no input. No input-injecting verb (notably `send-keys`) SHALL be present in the permitted verb set, and any attempt to invoke one SHALL be rejected.
+
+#### Scenario: No input is sent to an agent pane
+
+- **WHEN** the user interacts with the watcher TUI in any way
+- **THEN** the system never issues `send-keys` (or any input-injecting verb) to a watched agent pane
+
+#### Scenario: Input-injecting verbs stay rejected
+
+- **WHEN** any code path attempts to invoke `send-keys` through the multiplexer access layer
+- **THEN** the call is rejected rather than executed
+
+#### Scenario: Pane selection is permitted
+
+- **WHEN** the user switches to a row whose pane is not its window's active pane
+- **THEN** the system issues `select-pane` for that pane and no other state-changing verb
+
+### Requirement: Acknowledge a DONE pane without switching
+
+The system SHALL provide a keyboard action (the `a` key) that acknowledges the **highlighted** row when it is a DONE agent pane, returning it to IDLE and clearing its contribution to the DONE cue, without switching the client to that pane. Acknowledgement SHALL be driven by the keystroke, so a pane that already holds focus when it enters DONE is not auto-acknowledged. The action SHALL be a no-op when the highlighted row is not a DONE agent pane, including when it is a non-agent row.
+
+#### Scenario: Ack key clears the highlighted DONE pane
+
+- **WHEN** the highlighted row is a DONE pane and the user presses `a`
+- **THEN** the pane returns to IDLE, its DONE cue clears, and the client focus does not move
+
+#### Scenario: Ack key on a non-DONE pane does nothing
+
+- **WHEN** the highlighted row is an agent pane that is not DONE and the user presses `a`
+- **THEN** no state change occurs
+
+#### Scenario: Ack key on a non-agent row does nothing
+
+- **WHEN** the highlighted row is a non-agent pane and the user presses `a`
+- **THEN** no state change occurs

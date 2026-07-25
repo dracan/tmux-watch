@@ -55,6 +55,38 @@ public class PaneDiscoveryTests
     public void Parse_ignores_blank_lines() => Assert.Null(PaneDiscovery.Parse("   "));
 
     [Fact]
+    public void Parse_reads_the_window_activity_timestamp()
+    {
+        var pane = PaneDiscovery.Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123|1784969224");
+        Assert.Equal(1784969224, pane!.WindowActivityUnix);
+
+        var now = DateTimeOffset.FromUnixTimeSeconds(1784969224).AddMinutes(5);
+        Assert.Equal(TimeSpan.FromMinutes(5), pane.TimeSinceActivity(now));
+    }
+
+    [Fact]
+    public void Parse_treats_a_missing_or_unparseable_activity_stamp_as_unknown()
+    {
+        // Absent (a host that does not supply the field) and unparseable both degrade to
+        // "unknown" rather than failing the line.
+        var absent = PaneDiscovery.Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123");
+        Assert.Equal(0, absent!.WindowActivityUnix);
+        Assert.Null(absent.TimeSinceActivity(DateTimeOffset.UnixEpoch));
+
+        var garbage = PaneDiscovery.Parse("%3|s|0|0|bash|0|shell|/home/dan|0|0|123|not-a-number");
+        Assert.NotNull(garbage);
+        Assert.Equal(0, garbage!.WindowActivityUnix);
+    }
+
+    [Fact]
+    public void Activity_elapsed_never_goes_negative()
+    {
+        var pane = PaneDiscovery.Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123|1784969224");
+        var before = DateTimeOffset.FromUnixTimeSeconds(1784969224).AddMinutes(-5);
+        Assert.Equal(TimeSpan.Zero, pane!.TimeSinceActivity(before));
+    }
+
+    [Fact]
     public void Matches_copilot_by_command()
     {
         var fake = new FakeTmuxClient
@@ -145,6 +177,77 @@ public class PaneDiscoveryTests
         var agents = discovery.DiscoverAgentPanes();
 
         Assert.Empty(agents.Panes);
+    }
+
+    [Fact]
+    public void Non_agent_panes_are_returned_as_inventory()
+    {
+        var fake = new FakeTmuxClient
+        {
+            ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|k9s|0\n%3|s|1|0|lazygit|0\n%4|s|2|0|bash|0",
+        };
+        // selfPaneId "" pins "not running inside tmux", so an ambient TMUX_PANE in the
+        // test host cannot filter one of these ids out from under the assertion.
+        var discovery = new PaneDiscovery(fake, new WatchConfig(), selfPaneId: "");
+
+        var inventory = discovery.DiscoverPanes();
+
+        Assert.True(inventory.Ok);
+        Assert.Equal(new[] { "%1" }, inventory.AgentPanes.Select(p => p.Id));
+        Assert.Equal(new[] { "%2", "%3", "%4" }, inventory.OtherPanes.Select(p => p.Id));
+        Assert.Equal(new[] { "k9s", "lazygit", "bash" }, inventory.OtherPanes.Select(p => p.Command));
+    }
+
+    [Fact]
+    public void Inventory_costs_a_single_enumeration()
+    {
+        var fake = new FakeTmuxClient
+        {
+            ListOutput = "%1|s|0|0|copilot|0\n%2|s|0|1|bash|0",
+        };
+        var discovery = new PaneDiscovery(fake, new WatchConfig(), selfPaneId: "");
+
+        _ = discovery.DiscoverPanes();
+
+        Assert.Equal(1, fake.ListCalls);
+        // The inventory is never captured - discovery does not capture at all.
+        Assert.Empty(fake.CapturedPanes);
+    }
+
+    [Fact]
+    public void Watchers_own_pane_is_kept_out_of_the_inventory()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|bash|0\n%2|s|0|1|dotnet|0" };
+        var discovery = new PaneDiscovery(fake, new WatchConfig(), selfPaneId: "%2");
+
+        var inventory = discovery.DiscoverPanes();
+
+        Assert.Equal(new[] { "%1" }, inventory.OtherPanes.Select(p => p.Id));
+    }
+
+    [Fact]
+    public void Every_non_agent_pane_is_listed_when_the_watcher_is_not_inside_tmux()
+    {
+        var fake = new FakeTmuxClient { ListOutput = "%1|s|0|0|bash|0\n%2|s|0|1|dotnet|0" };
+        var discovery = new PaneDiscovery(fake, new WatchConfig(), selfPaneId: "");
+
+        var inventory = discovery.DiscoverPanes();
+
+        Assert.Equal(new[] { "%1", "%2" }, inventory.OtherPanes.Select(p => p.Id));
+    }
+
+    [Fact]
+    public void Inventory_is_empty_when_the_server_is_unavailable()
+    {
+        var fake = new FakeTmuxClient { Started = false, ErrorMessage = "tmux not found" };
+        var discovery = new PaneDiscovery(fake, new WatchConfig());
+
+        var inventory = discovery.DiscoverPanes();
+
+        Assert.False(inventory.Ok);
+        Assert.Empty(inventory.AgentPanes);
+        Assert.Empty(inventory.OtherPanes);
+        Assert.Contains("tmux not found", inventory.Error);
     }
 
     [Fact]

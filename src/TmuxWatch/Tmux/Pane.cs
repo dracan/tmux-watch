@@ -17,10 +17,16 @@ public sealed record Pane(
     bool WindowActive = false,
     bool PaneActive = false,
     int Pid = 0,
-    string AgentId = "")
+    string AgentId = "",
+    long WindowActivityUnix = 0)
 {
     // AgentId is empty as parsed from tmux; discovery stamps it with the id of the
     // matched agent profile (e.g. "copilot", "claude").
+
+    // WindowActivityUnix is tmux's #{window_activity} (unix seconds). It is
+    // window-granular - tmux 3.4 exposes no pane-level equivalent - so every pane in a
+    // split reports the same figure. 0 means "unknown" (absent, unparseable, or a host
+    // that does not supply it).
 
     /// <summary>Target usable with tmux -t for window selection, e.g. "work:1".</summary>
     public string WindowTarget => $"{SessionName}:{WindowIndex}";
@@ -44,6 +50,18 @@ public sealed record Pane(
             var idx = trimmed.LastIndexOfAny(new[] { '/', '\\' });
             return idx >= 0 && idx < trimmed.Length - 1 ? trimmed[(idx + 1)..] : trimmed;
         }
+    }
+
+    /// <summary>
+    /// Time since this pane's window was last active, or null when tmux gave no usable
+    /// activity timestamp. A clock skew that would yield a negative span reads as zero.
+    /// </summary>
+    public TimeSpan? TimeSinceActivity(DateTimeOffset now)
+    {
+        if (WindowActivityUnix <= 0)
+            return null;
+        var elapsed = now - DateTimeOffset.FromUnixTimeSeconds(WindowActivityUnix);
+        return elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
     }
 
     /// <summary>Human-readable identifier: window name, falling back to the path label.</summary>

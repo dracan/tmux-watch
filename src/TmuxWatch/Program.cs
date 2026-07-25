@@ -57,6 +57,14 @@ static void PrintOnce(MonitorSnapshot snap)
         AnsiConsole.MarkupLine($"{(p.Pane.IsFocused ? "[green]►[/]" : " ")} {Markup.Escape(p.Pane.Location)}\t{Markup.Escape(p.Pane.AgentId)}\t{Markup.Escape(p.Pane.DisplayName)}\t{p.State}\t{Markup.Escape(p.Pane.Command)}");
     if (snap.Panes.Count == 0 && snap.Error is null)
         AnsiConsole.MarkupLine("[grey]No agent panes found.[/]");
+
+    // The non-agent panes carry no classified state - they are listed by process so the
+    // one-shot output covers everything the live view shows.
+    foreach (var pane in snap.OtherPanes
+                 .OrderBy(p => p.SessionName, StringComparer.Ordinal)
+                 .ThenBy(p => p.WindowIndex)
+                 .ThenBy(p => p.PaneIndex))
+        AnsiConsole.MarkupLine($"{(pane.IsFocused ? "[green]►[/]" : " ")} {Markup.Escape(pane.Location)}\t[grey]-[/]\t{Markup.Escape(pane.DisplayName)}\t[grey]other[/]\t{Markup.Escape(pane.Command)}");
 }
 
 // Self-test: classify every live pane and show the status tail, so tokens can be

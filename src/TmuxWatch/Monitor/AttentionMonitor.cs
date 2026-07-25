@@ -2,14 +2,22 @@ using TmuxWatch.Config;
 using TmuxWatch.Detection;
 using TmuxWatch.Discovery;
 using TmuxWatch.Notifications;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Monitor;
 
+/// <param name="OtherPanes">
+/// The non-agent inventory for this tick, carried through untouched so one poll serves
+/// both the attention view and the pane list. These panes are inert: they are never
+/// captured, classified, given a <see cref="TrackedPane"/> entry, notified on, or allowed
+/// to influence the pointer aggregate. Empty when the enumeration failed.
+/// </param>
 public sealed record MonitorSnapshot(
     IReadOnlyList<TrackedPaneView> Panes,
     IReadOnlyList<AttentionEvent> Events,
     DateTimeOffset At,
-    string? Error);
+    string? Error,
+    IReadOnlyList<Pane> OtherPanes);
 
 /// <summary>
 /// Drives the discover → capture → classify → state-machine pipeline. Each
@@ -51,17 +59,22 @@ public sealed class AttentionMonitor
     public MonitorSnapshot Tick()
     {
         var now = _clock.GetUtcNow();
-        var discovered = _discovery.DiscoverAgentPanes();
+        var discovered = _discovery.DiscoverPanes();
 
         // On a hard server/CLI failure, keep prior state and report the error so
-        // the watcher stays alive (resilience requirement).
+        // the watcher stays alive (resilience requirement). The inventory is view-only,
+        // so unlike tracked pane state there is nothing worth retaining across a failed
+        // enumeration - it goes empty for this tick.
         if (!discovered.Ok)
-            return new MonitorSnapshot(SnapshotViews(), Array.Empty<AttentionEvent>(), now, discovered.Error);
+            return new MonitorSnapshot(
+                SnapshotViews(), Array.Empty<AttentionEvent>(), now, discovered.Error, Array.Empty<Pane>());
 
         var events = new List<AttentionEvent>();
         var seen = new HashSet<string>();
 
-        foreach (var pane in discovered.Panes)
+        // Only the matched agent panes enter the pipeline below; discovered.OtherPanes is
+        // never captured, classified, or tracked - it is passed straight to the snapshot.
+        foreach (var pane in discovered.AgentPanes)
         {
             seen.Add(pane.Id);
 
@@ -143,7 +156,7 @@ public sealed class AttentionMonitor
                 _tracked.Remove(goneId);
         }
 
-        return new MonitorSnapshot(SnapshotViews(), events, now, null);
+        return new MonitorSnapshot(SnapshotViews(), events, now, null, discovered.OtherPanes);
     }
 
     /// <summary>

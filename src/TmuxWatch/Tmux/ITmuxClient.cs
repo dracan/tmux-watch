@@ -25,4 +25,12 @@ public interface ITmuxClient
 
     /// <summary>Select a window within a session (focus only).</summary>
     TmuxResult SelectWindow(string windowTarget);
+
+    /// <summary>
+    /// Select a pane within its window (focus only), so a jump lands on the exact pane a
+    /// row names rather than on whichever pane that window last had active. This changes
+    /// the window's active pane - server state other clients can observe - but injects no
+    /// input; see the read-only guarantee in AGENTS.md.
+    /// </summary>
+    TmuxResult SelectPane(string paneId);
 }

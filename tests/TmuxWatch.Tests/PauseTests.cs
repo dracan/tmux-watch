@@ -16,45 +16,37 @@ public class PauseTests
             DateTimeOffset.UnixEpoch.AddSeconds(enteredSeconds),
             false);
 
+    private static Pane Other(string id, int window = 9, int pane = 0, string command = "bash") =>
+        new(id, "s", window, pane, command, false, $"win{window}", "");
+
     [Fact]
-    public void Toggling_pauses_the_focused_pane()
+    public void Toggling_pauses_the_highlighted_pane()
     {
         var paused = new HashSet<string>();
-        var all = new List<TrackedPaneView>
-        {
-            View("%1"),
-            View("%2", focused: true),
-        };
 
-        var changed = WatcherApp.ToggleFocusedPause(paused, all);
+        var changed = WatcherApp.TogglePause(paused, "%2");
 
         Assert.True(changed);
         Assert.Equal(new[] { "%2" }, paused);
     }
 
     [Fact]
-    public void Toggling_an_already_paused_focused_pane_resumes_it()
+    public void Toggling_an_already_paused_pane_resumes_it()
     {
         var paused = new HashSet<string> { "%2" };
-        var all = new List<TrackedPaneView>
-        {
-            View("%1"),
-            View("%2", focused: true),
-        };
 
-        var changed = WatcherApp.ToggleFocusedPause(paused, all);
+        var changed = WatcherApp.TogglePause(paused, "%2");
 
         Assert.True(changed);
         Assert.Empty(paused);
     }
 
     [Fact]
-    public void Toggling_with_no_focused_pane_is_a_noop()
+    public void Toggling_with_nothing_highlighted_is_a_noop()
     {
         var paused = new HashSet<string>();
-        var all = new List<TrackedPaneView> { View("%1"), View("%2") };
 
-        var changed = WatcherApp.ToggleFocusedPause(paused, all);
+        var changed = WatcherApp.TogglePause(paused, null);
 
         Assert.False(changed);
         Assert.Empty(paused);
@@ -90,5 +82,62 @@ public class PauseTests
         var ordered = WatcherApp.OrderAll(panes, paused);
 
         Assert.Equal(new[] { "%waiting", "%working", "%idle" }, ordered.Select(v => v.Pane.Id));
+    }
+
+    [Fact]
+    public void Paused_agent_pane_moves_into_the_paused_table()
+    {
+        var layout = WatcherApp.BuildLayout(
+            new[] { View("%1"), View("%2") },
+            Array.Empty<Pane>(),
+            new HashSet<string> { "%2" },
+            showOtherPanes: true,
+            showCompanionPanes: true);
+
+        Assert.Equal(new[] { "%1" }, layout.Agent.Select(r => r.Id));
+        Assert.Equal(new[] { "%2" }, layout.Paused.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void Paused_non_agent_pane_moves_into_the_paused_table()
+    {
+        var layout = WatcherApp.BuildLayout(
+            new[] { View("%1") },
+            new[] { Other("%7"), Other("%8", window: 10) },
+            new HashSet<string> { "%7" },
+            showOtherPanes: true,
+            showCompanionPanes: true);
+
+        Assert.Equal(new[] { "%8" }, layout.Other.Select(r => r.Id));
+        Assert.Equal(new[] { "%7" }, layout.Paused.Select(r => r.Id));
+        // The paused non-agent row is still a non-agent row: no classified state.
+        Assert.False(layout.Paused[0].IsAgent);
+    }
+
+    [Fact]
+    public void Paused_table_holds_agent_rows_before_non_agent_rows()
+    {
+        var layout = WatcherApp.BuildLayout(
+            new[] { View("%1"), View("%2") },
+            new[] { Other("%7") },
+            new HashSet<string> { "%2", "%7" },
+            showOtherPanes: true,
+            showCompanionPanes: true);
+
+        Assert.Equal(new[] { "%2", "%7" }, layout.Paused.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void Hiding_other_panes_also_hides_their_paused_rows()
+    {
+        var layout = WatcherApp.BuildLayout(
+            new[] { View("%1") },
+            new[] { Other("%7") },
+            new HashSet<string> { "%7" },
+            showOtherPanes: false,
+            showCompanionPanes: true);
+
+        Assert.Empty(layout.Other);
+        Assert.Empty(layout.Paused);
     }
 }

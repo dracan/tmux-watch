@@ -23,7 +23,9 @@ public class AttentionMonitorTests
     {
         cfg ??= new WatchConfig();
         clock = new FakeClock(DateTimeOffset.UnixEpoch);
-        var discovery = new PaneDiscovery(fake, cfg);
+        // selfPaneId "" pins "not running inside tmux" so an ambient TMUX_PANE in the test
+        // host cannot filter a pane out of the inventory under an assertion.
+        var discovery = new PaneDiscovery(fake, cfg, selfPaneId: "");
         return new AttentionMonitor(discovery, fake, cfg, new NullNotifier(), clock);
     }
 
