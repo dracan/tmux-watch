@@ -53,8 +53,10 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 
 > **Read-only guarantee:** tmux-watch never sends keystrokes to a watched pane.
 > The tmux access layer whitelists only `lsp`, `capture-pane`, `display-message`,
-> `switch-client`, and `select-window`; `send-keys` (and anything like it) cannot
-> be invoked.
+> `switch-client`, `select-window`, and `select-pane`; `send-keys` (and anything
+> like it) cannot be invoked. The only state these can change is *focus*: which
+> session and window the watcher's own client is on, and which pane is active
+> within a window.
 
 ## Prerequisites
 
@@ -68,7 +70,7 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 ## Usage
 
 ```sh
-# Live TUI: watch all Copilot panes, sorted with WAITING at the top.
+# Live TUI: watch all agent panes, sorted with WAITING at the top.
 ./go.sh
 
 # One-shot snapshot (no TUI), useful for scripts.
@@ -82,18 +84,46 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 `go.ps1` is kept for a Windows/PowerShell host. You can also invoke `dotnet run`
 directly.
 
-In the TUI: press a **number key** to switch the terminal to that pane,
-**`a`** to acknowledge the focused (`►`) pane if it is DONE (clears it back to IDLE
-without switching), **`p`** to pause/resume the focused pane, **`w`** to toggle wide
-mode, and `q`/`Esc` to quit.
+### Keys
+
+| Key | Action |
+| --- | --- |
+| up / down | Move the highlighted row (spans every table as one list) |
+| enter | Switch to the highlighted row's pane |
+| `1`-`9`, then shift+`A`-`Z` | Switch to that row directly (numbering is continuous across tables) |
+| `a` | Acknowledge the highlighted row when it is a DONE agent pane (clears it back to IDLE without switching) |
+| `p` | Pause / resume the highlighted row |
+| `o` | Show / hide the Other panes table (default: shown) |
+| `c` | Include / exclude companion panes (default: included) |
+| `w` | Wide mode: show the Path and Loc columns |
+| `q` / `Esc` | Quit |
+
+`p` and `a` act on the **highlighted** row, not on the pane tmux happens to have
+focused; the `►` marker is a passive indicator only.
 
 Wide mode reveals the **Path** and **Loc** columns, which are hidden by default
-so the table fits a thin terminal split. It is per-run and starts disabled.
+so the table fits a thin terminal split.
 
 Pausing parks a pane in a separate **Paused** table below the main list, so the
-top table stays focused on the sessions you are actively working on. Bring a pane
-back by switching to it (its number still works) and pressing `p` again. Paused
-state is per-run and is not persisted across restarts.
+top table stays focused on the sessions you are actively working on. Bring it
+back by highlighting it and pressing `p` again.
+
+The `o`, `c` and `w` toggles and the paused set are all per-run: they reset to
+their defaults on each launch and have no config key.
+
+### Other panes
+
+Panes that are *not* running a coding agent are listed in a separate **Other
+panes** table, so the watcher doubles as a jump target for the whole tmux server.
+These rows are inert inventory - never captured, classified, tracked, notified
+on, or able to move the pointer cue - and they ride along on the enumeration
+discovery already performs, so listing them costs no extra tmux call. Their state
+column shows the foreground process, and their timer shows time since the
+*window's* last activity (tmux has no pane-level equivalent, so that figure is
+shared across a split).
+
+`c` controls whether **companion panes** - non-agent panes that share a window
+with an agent - appear in that table.
 
 ### Options
 
@@ -119,7 +149,7 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
   "notificationChannel": "bell",
   "statusLineCount": 6,
   "pointerSignal": {
-    "enabled": false,
+    "enabled": true,
     "waitingCursorFile": "assets/waiting-cursor.cur",
     "doneCursorFile": "assets/done-cursor.cur",
     "shapes": ["arrow", "ibeam"]
@@ -155,7 +185,7 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
 Set `tmuxExecutable` to `psmux` (or another tmux-compatible CLI) to run against a
 different multiplexer host.
 
-### Pointer signal (opt-in)
+### Pointer signal
 
 `pointerSignal` turns the real Windows mouse pointer a **signal colour across the
 whole desktop** for as long as any *non-paused* watched pane needs you - **red**
@@ -163,7 +193,7 @@ while any pane is WAITING, **green** while any pane is DONE (a finished turn) an
 is WAITING - restoring the normal pointer once nothing needs you. It is a persistent
 ambient reminder that outlasts the one-shot bell, visible even when the terminal is
 minimised. WAITING (red) takes precedence over DONE (green) when both are present. It
-is **off by default**; set `enabled: true` to use it.
+is **on by default**; set `enabled: false` to turn it off.
 
 - **Paused panes are excluded.** Panes you have parked (pressed `p`, moved to the
   secondary table) do not trigger the pointer - so pausing a waiting pane clears
