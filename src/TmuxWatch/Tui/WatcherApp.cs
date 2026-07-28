@@ -1,3 +1,4 @@
+using System.Text;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using TmuxWatch.Config;
@@ -127,6 +128,8 @@ public sealed class WatcherApp
     {
         var pollMs = (int)(_cfg.PollIntervalSeconds * 1000);
 
+        using var buffered = BufferStdout();
+
         // Start on a clean screen so the watcher is the only thing in the terminal,
         // regardless of how it was launched (go scripts, dotnet run, published binary).
         // Also wipes any build/restore output `dotnet run` may have printed.
@@ -135,25 +138,80 @@ public sealed class WatcherApp
         var frame = new FrameState();
         var initial = BuildView(WatchLayout.Empty, null, DateTimeOffset.UtcNow);
 
-        AnsiConsole.Live(initial)
-            .AutoClear(false)
-            .Start(ctx =>
-            {
-                while (!token.IsCancellationRequested)
+        try
+        {
+            AnsiConsole.Live(initial)
+                .AutoClear(false)
+                .Start(ctx =>
                 {
-                    var snapshot = _monitor.Tick();
-                    frame.Error = snapshot.Error ?? frame.Error;
-                    frame.AgentViews = snapshot.Panes.ToList();
-                    frame.OtherPanes = snapshot.OtherPanes.ToList();
+                    while (!token.IsCancellationRequested)
+                    {
+                        var snapshot = _monitor.Tick();
+                        frame.Error = snapshot.Error ?? frame.Error;
+                        frame.AgentViews = snapshot.Panes.ToList();
+                        frame.OtherPanes = snapshot.OtherPanes.ToList();
 
-                    Rebuild(frame);
-                    Render(frame, ctx);
-                    DrivePointer(frame.AgentViews);
+                        Rebuild(frame);
+                        Render(frame, ctx);
+                        DrivePointer(frame.AgentViews);
 
-                    if (WaitAndHandleKeys(pollMs, frame, ctx, token))
-                        break; // quit requested
-                }
-            });
+                        if (WaitAndHandleKeys(pollMs, frame, ctx, token))
+                            break; // quit requested
+                    }
+                });
+        }
+        finally
+        {
+            // The teardown Spectre writes on exit (cursor restore) is buffered too, so
+            // the last flush has to happen after Live returns, however it returned.
+            buffered?.Flush();
+        }
+    }
+
+    /// <summary>
+    /// Replaces <see cref="Console.Out"/> with a buffered, non-auto-flushing writer and
+    /// returns it, or null if that is not possible.
+    /// <para>
+    /// This is what makes the view feel responsive. Spectre emits a repaint as several
+    /// hundred small writes - one per styled segment, ~480 for this layout - and the
+    /// default <c>Console.Out</c> on Unix auto-flushes, so each becomes its own write
+    /// syscall. Over a WSL console bridge that is hundreds of round trips per frame, which
+    /// is felt directly as lag while typing in the name prompt, since every keystroke
+    /// repaints. Buffering turns a frame into one write; <see cref="Render"/> flushes.
+    /// </para>
+    /// <para>
+    /// Console.SetOut only swaps the sink - the underlying handle is untouched - so
+    /// Spectre's terminal detection and width probing are unaffected. It must happen
+    /// before the first AnsiConsole use, which is why it is the first thing Run does.
+    /// </para>
+    /// </summary>
+    private static StreamWriter? BufferStdout()
+    {
+        try
+        {
+            var writer = new StreamWriter(
+                Console.OpenStandardOutput(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                bufferSize: 64 * 1024)
+            {
+                AutoFlush = false,
+            };
+            Console.SetOut(writer);
+
+            // Rebind Spectre onto the new sink. It captures Console.Out when its console
+            // is first created, so without this the buffering would silently do nothing
+            // if anything touched AnsiConsole earlier in startup. Detection still works:
+            // the fresh console sees Writer == Console.Out and asks Console.IsOutputRedirected,
+            // which reports on the real handle, and that is untouched by SetOut.
+            AnsiConsole.Console = AnsiConsole.Create(new AnsiConsoleSettings());
+
+            return writer;
+        }
+        catch (IOException)
+        {
+            // No usable stdout (redirected oddly, closed); carry on unbuffered.
+            return null;
+        }
     }
 
     /// <summary>
@@ -174,6 +232,8 @@ public sealed class WatcherApp
     {
         ctx.UpdateTarget(BuildView(frame.Layout, frame.Error, DateTimeOffset.UtcNow));
         ctx.Refresh();
+        // One syscall per frame instead of one per styled segment; see BufferStdout.
+        Console.Out.Flush();
     }
 
     /// <summary>

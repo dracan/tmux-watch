@@ -133,6 +133,21 @@ tokens are build-specific and have changed before (the current build's WORKING
 detection keys on the live spinner line, not the dropped `esc to interrupt` marker);
 re-run `--calibrate` and update the `claude` profile after a Claude Code upgrade.
 
+## Buffered stdout is load-bearing
+
+`WatcherApp.Run` replaces `Console.Out` with a non-auto-flushing `StreamWriter` and
+flushes once per frame in `Render`. This is not a micro-optimisation: Spectre emits a
+repaint as several hundred small writes (~480 for the default layout, measured), and the
+stock `Console.Out` auto-flushes, so each becomes its own write syscall. Over a WSL
+console bridge that is hundreds of round trips per frame - unnoticeable at the 2s poll,
+but felt directly as lag in the `n` prompt, where every keystroke repaints. CPU cost of
+building and laying out the view is under 2ms and was never the bottleneck.
+
+If you touch the render path: keep the flush, and keep `BufferStdout` running before the
+first `AnsiConsole` use (it rebinds `AnsiConsole.Console` so ordering cannot silently
+defeat it). Terminal detection is unaffected because `Console.SetOut` swaps only the sink,
+not the underlying handle.
+
 ## Conventions
 
 - Match the surrounding code's style; keep the classifier pure and fixture-tested.
