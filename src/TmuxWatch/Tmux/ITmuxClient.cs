@@ -8,9 +8,10 @@ public sealed record TmuxResult(bool Started, int ExitCode, string StdOut, strin
 }
 
 /// <summary>
-/// Read-only-by-design access to a pane multiplexer. Only the verbs needed for
-/// watching and focus-switching are exposed; there is deliberately no way to send
-/// input to a watched pane.
+/// Access to a pane multiplexer, bounded by the three tiers in AGENTS.md: a pane's
+/// content is never written (there is deliberately no way to send input to a pane),
+/// focus may be moved, and windows may be created on an explicit keystroke. Only the
+/// verbs those tiers permit are exposed.
 /// </summary>
 public interface ITmuxClient
 {
@@ -33,4 +34,22 @@ public interface ITmuxClient
     /// input; see the read-only guarantee in AGENTS.md.
     /// </summary>
     TmuxResult SelectPane(string paneId);
+
+    /// <summary>
+    /// Create a window in <paramref name="sessionName"/>, detached, so no client moves;
+    /// the caller jumps to it separately through the focus verbs. This is the watcher's
+    /// one lifecycle verb and may only be reached from an explicit keystroke, never from
+    /// the poll loop.
+    /// <para>
+    /// <paramref name="windowName"/> is user-entered text and MUST be used only as the
+    /// window's name; implementations must never place it in a command position, since
+    /// the underlying verb also accepts a shell command. A null or blank name is omitted
+    /// entirely, leaving the multiplexer to name the window itself.
+    /// </para>
+    /// <para>
+    /// On success the result's stdout carries the new window's id, so the caller can
+    /// select it - a detached create does not make the window current.
+    /// </para>
+    /// </summary>
+    TmuxResult NewWindow(string sessionName, string? windowName);
 }

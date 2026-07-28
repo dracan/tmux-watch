@@ -23,6 +23,7 @@ public class TmuxRunnerTests
     [InlineData("switch-client")]
     [InlineData("select-window")]
     [InlineData("select-pane")]
+    [InlineData("new-window")]
     public void Allows_read_and_focus_verbs(string verb)
     {
         // Non-existent executable => NotStarted result, but the verb guard must pass
@@ -41,5 +42,17 @@ public class TmuxRunnerTests
 
         Assert.False(runner.SelectPane("%1").Started);
         Assert.Throws<InvalidOperationException>(() => runner.Run("send-keys", "-t", "%1", "x"));
+    }
+
+    [Fact]
+    public void New_window_is_permitted_without_loosening_the_input_ban()
+    {
+        // The lifecycle tier admits new-window; the inviolable tier is unchanged by it.
+        var runner = new TmuxRunner("tmux-does-not-exist-xyz");
+
+        Assert.False(runner.NewWindow("work", "scratch").Started);
+        Assert.Throws<InvalidOperationException>(() => runner.Run("send-keys", "-t", "%1", "x"));
+        Assert.Throws<InvalidOperationException>(() => runner.Run("kill-window", "-t", "work:1"));
+        Assert.Throws<InvalidOperationException>(() => runner.Run("rename-window", "-t", "work:1", "x"));
     }
 }

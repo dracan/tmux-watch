@@ -6,8 +6,10 @@ namespace TmuxWatch.Tmux;
 
 /// <summary>
 /// Shells out to the tmux CLI via <see cref="ProcessStartInfo.ArgumentList"/>
-/// (avoids quoting issues). A verb whitelist enforces the read-only guarantee:
-/// input-injecting verbs such as <c>send-keys</c> can never be invoked.
+/// (avoids quoting issues). A verb whitelist enforces the inviolable tier of the
+/// boundary in AGENTS.md: input-injecting verbs such as <c>send-keys</c> can never be
+/// invoked, so a pane's content stays read-only. The whitelist also carries the focus
+/// verbs and the one lifecycle verb (<c>new-window</c>) the watcher may use.
 /// </summary>
 public sealed class TmuxRunner : ITmuxClient
 {
@@ -19,6 +21,7 @@ public sealed class TmuxRunner : ITmuxClient
         "switch-client", "switchc",
         "select-window", "selectw",
         "select-pane", "selectp",
+        "new-window", "neww",
     };
 
     private readonly string _exe;
@@ -39,6 +42,27 @@ public sealed class TmuxRunner : ITmuxClient
 
     public TmuxResult SelectPane(string paneId) =>
         Run("select-pane", "-t", paneId);
+
+    public TmuxResult NewWindow(string sessionName, string? windowName)
+    {
+        // The argument list is built here rather than taken from the caller, so no code
+        // path can append the trailing shell-command argument new-window accepts. The
+        // user-typed name reaches -n and nothing else; -n consumes its value, so a name
+        // starting with '-' is not read as a flag. -d keeps the create detached - the
+        // caller performs the jump itself through the focus verbs - and -P -F prints the
+        // new window's id, which is the only way to then select a window that was not
+        // made current.
+        var args = new List<string>
+        {
+            "new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName,
+        };
+        if (!string.IsNullOrWhiteSpace(windowName))
+        {
+            args.Add("-n");
+            args.Add(windowName);
+        }
+        return Run(args.ToArray());
+    }
 
     public TmuxResult Run(params string[] args)
     {

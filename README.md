@@ -1,8 +1,9 @@
 # tmux-watch
 
-A read-only watcher that tells you which **coding-agent** sessions - **GitHub
-Copilot CLI** and **Claude Code** - running inside **tmux** panes need your
-attention, and lets you jump straight to them.
+A watcher that tells you which **coding-agent** sessions - **GitHub Copilot CLI**
+and **Claude Code** - running inside **tmux** panes need your attention, and lets
+you jump straight to them. It never types into a pane; watching is entirely
+read-only.
 
 When you run several agent sessions across tmux panes, it is easy to lose track
 of which ones have stopped and are blocked waiting for you (a command/permission
@@ -51,12 +52,14 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 4. Drives a per-pane state machine and **notifies once** when a pane *enters*
    WAITING, and once when a pane *enters* DONE (both edge-triggered, not every poll).
 
-> **Read-only guarantee:** tmux-watch never sends keystrokes to a watched pane.
-> The tmux access layer whitelists only `lsp`, `capture-pane`, `display-message`,
-> `switch-client`, `select-window`, and `select-pane`; `send-keys` (and anything
-> like it) cannot be invoked. The only state these can change is *focus*: which
-> session and window the watcher's own client is on, and which pane is active
-> within a window.
+> **Read-only guarantee:** tmux-watch never sends keystrokes to a pane. A pane's
+> *content* is read-only, permanently - `send-keys` (and anything like it) cannot
+> be invoked. The tmux access layer whitelists only `lsp`, `capture-pane`,
+> `display-message`, `switch-client`, `select-window`, `select-pane`, and
+> `new-window`. Beyond reading, those change only *focus* - which session and
+> window the watcher's own client is on, and which pane is active within a
+> window - plus, on the `n` key alone, creating a new window. Nothing is ever
+> created, renamed, or destroyed by the poll loop; only by a keystroke.
 
 ## Prerequisites
 
@@ -92,6 +95,7 @@ directly.
 | enter | Switch to the highlighted row's pane |
 | `1`-`9`, then shift+`A`-`Z` | Switch to that row directly (numbering is continuous across tables) |
 | `a` | Acknowledge the highlighted row when it is a DONE agent pane (clears it back to IDLE without switching) |
+| `n` | New window in the focused pane's session - prompts for a name, then jumps to it |
 | `p` | Pause / resume the highlighted row |
 | `o` | Show / hide the Other panes table (default: shown) |
 | `c` | Include / exclude companion panes (default: included) |
@@ -99,7 +103,14 @@ directly.
 | `q` / `Esc` | Quit |
 
 `p` and `a` act on the **highlighted** row, not on the pane tmux happens to have
-focused; the `►` marker is a passive indicator only.
+focused. The `►` marker is never the target of a row action; `n` is the only key that
+reads it, and only for the session it names.
+
+Pressing `n` opens a name prompt under the tables - the tables stay up and keep
+refreshing while you type. It supports cursor editing (left/right, home/end, backspace,
+delete) plus `ctrl+w` to delete the previous word and `ctrl+u` to clear the line. Enter
+creates the window, `Esc` cancels. An empty name lets tmux name the window itself. While
+the prompt is open every key goes to it, so `q` types a `q` rather than quitting.
 
 Wide mode reveals the **Path** and **Loc** columns, which are hidden by default
 so the table fits a thin terminal split.

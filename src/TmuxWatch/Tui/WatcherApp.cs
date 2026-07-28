@@ -71,6 +71,14 @@ public sealed class WatcherApp
     private string? _highlightedId;
     private int _highlightIndex;
 
+    // The open name prompt, or null when there is none. While it is non-null the prompt
+    // is modal: every keystroke goes to the editor and no command or address key fires.
+    // The target session is captured when the prompt opens rather than resolved on
+    // submit, because polling continues while the user types and the focus marker can
+    // move under them - re-resolving would silently land the window elsewhere.
+    private LineEditor? _prompt;
+    private string _promptSession = "";
+
     public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg, IPointerSignal? pointer = null)
     {
         _monitor = monitor;
@@ -244,6 +252,36 @@ public sealed class WatcherApp
     }
 
     /// <summary>
+    /// The session a new window should be created in: the session of the pane carrying
+    /// the focus marker. tmux tracks the active window and pane <em>per session</em>, so
+    /// with several sessions more than one visible row can carry the marker; the tie
+    /// breaks toward the highlighted row's session, which is the one the user is looking
+    /// at. With no marked row at all the highlighted row's session is used, and with no
+    /// rows there is nothing to target and the caller does nothing.
+    /// <para>
+    /// This reads only what is already on screen, so resolving costs no tmux call.
+    /// </para>
+    /// </summary>
+    internal static string? ResolveTargetSession(
+        IReadOnlyList<WatchRow> rows, string? highlightedId)
+    {
+        if (rows.Count == 0)
+            return null;
+
+        var highlighted = rows.FirstOrDefault(
+            r => string.Equals(r.Id, highlightedId, StringComparison.Ordinal)) ?? rows[0];
+
+        var focused = rows.Where(r => r.Pane.IsFocused).ToList();
+        if (focused.Count == 0)
+            return highlighted.Pane.SessionName;
+
+        var preferred = focused.FirstOrDefault(r => string.Equals(
+            r.Pane.SessionName, highlighted.Pane.SessionName, StringComparison.Ordinal));
+
+        return (preferred ?? focused[0]).Pane.SessionName;
+    }
+
+    /// <summary>
     /// The key that addresses the row at <paramref name="index"/> (0-based, in render
     /// order): digits 1-9 for the first nine rows, then shift+letter A-Z for rows ten
     /// onward. Empty when the row is past the addressable range.
@@ -287,6 +325,18 @@ public sealed class WatcherApp
                 if (Console.KeyAvailable)
                 {
                     var key = Console.ReadKey(intercept: true);
+
+                    // The name prompt is modal and must be tested before anything else:
+                    // while it is open, q is a character rather than quit and esc cancels
+                    // the prompt rather than the app.
+                    if (_prompt is not null)
+                    {
+                        HandlePromptKey(key, frame, ctx);
+                        Thread.Sleep(slice);
+                        elapsed += slice;
+                        continue;
+                    }
+
                     if (key.Key is ConsoleKey.Q or ConsoleKey.Escape)
                         return true;
 
@@ -350,6 +400,18 @@ public sealed class WatcherApp
                             DrivePointer(frame.AgentViews);
                         }
                     }
+                    else if (key.KeyChar == 'n')
+                    {
+                        // Open the name prompt against the session resolved right now.
+                        // Nothing is created until submit, and nothing at all happens
+                        // when there is no row to derive a session from.
+                        if (ResolveTargetSession(frame.Layout.All, _highlightedId) is { } session)
+                        {
+                            _prompt = LineEditor.Empty;
+                            _promptSession = session;
+                            Render(frame, ctx);
+                        }
+                    }
                     else if (IndexForAddressKey(key.KeyChar) is var index and >= 0)
                     {
                         Activate(frame, index, ctx);
@@ -365,6 +427,116 @@ public sealed class WatcherApp
             elapsed += slice;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Feed one keystroke to the open name prompt. Submitting creates the window in the
+    /// session captured when the prompt opened and jumps to it; cancelling closes the
+    /// prompt without touching tmux at all.
+    /// </summary>
+    private void HandlePromptKey(ConsoleKeyInfo key, FrameState frame, LiveDisplayContext ctx)
+    {
+        var (editor, outcome) = _prompt!.Value.Apply(key);
+        var session = _promptSession;
+
+        switch (outcome)
+        {
+            case LineEditorOutcome.Submit:
+                var name = editor.Text.Trim();
+                ClosePrompt();
+                CreateWindow(session, name, frame, ctx);
+                break;
+
+            case LineEditorOutcome.Cancel:
+                ClosePrompt();
+                Render(frame, ctx);
+                break;
+
+            default:
+                _prompt = editor;
+                Render(frame, ctx);
+                break;
+        }
+    }
+
+    private void ClosePrompt()
+    {
+        _prompt = null;
+        _promptSession = "";
+    }
+
+    /// <summary>
+    /// Create a window in <paramref name="session"/> and jump to it. The create is
+    /// detached, so it moves no client by itself; tmux reports the new window's id, and
+    /// the jump then goes through the same focus-only verbs a row switch uses. A blank
+    /// name is passed as null, leaving tmux to name the window itself.
+    /// </summary>
+    private void CreateWindow(string session, string name, FrameState frame, LiveDisplayContext ctx)
+    {
+        if (CreateAndJump(_tmux, session, name) is { } error)
+        {
+            frame.Error = error;
+            Render(frame, ctx);
+            return;
+        }
+
+        // The new window holds focus now, but it has no row until the next poll enumerates
+        // it, so no visible row should keep the marker. Clearing it across the target
+        // session is the accurate in-frame reading; the poll reconciles the rest.
+        ClearFocusMarker(frame.AgentViews, session);
+        ClearFocusMarker(frame.OtherPanes, session);
+
+        Rebuild(frame);
+        Render(frame, ctx);
+    }
+
+    /// <summary>
+    /// Create a window in <paramref name="session"/>, then jump to it with focus-only
+    /// verbs. A blank name is sent as null so tmux applies its own naming; the name is
+    /// never placed anywhere but the name argument. Returns null on success, or a message
+    /// describing the failure. Nothing here is a lifecycle change beyond the one create.
+    /// </summary>
+    internal static string? CreateAndJump(ITmuxClient tmux, string session, string? name)
+    {
+        var created = tmux.NewWindow(session, string.IsNullOrWhiteSpace(name) ? null : name);
+        if (!created.Ok)
+            return created.StdErr.Trim() is { Length: > 0 } message
+                ? message
+                : $"Could not create a window in {session}.";
+
+        tmux.SwitchClient(session);
+
+        // The create was detached, so the new window is not the session's current one -
+        // it has to be selected by the id tmux printed. Without an id (a host that does
+        // not report one) the session switch alone is as far as the jump can go.
+        var windowId = created.StdOut.Trim();
+        if (windowId.Length > 0)
+            tmux.SelectWindow(windowId);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Drops the focus marker from every pane of <paramref name="session"/>, used when
+    /// focus has moved somewhere no row represents yet.
+    /// </summary>
+    internal static void ClearFocusMarker(List<TrackedPaneView> ordered, string session)
+    {
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (string.Equals(ordered[i].Pane.SessionName, session, StringComparison.Ordinal))
+                ordered[i] = ordered[i] with { Pane = ordered[i].Pane with { WindowActive = false } };
+        }
+    }
+
+    /// <summary>Same marker clearing, over the non-agent panes.</summary>
+    internal static void ClearFocusMarker(List<Pane> panes, string session)
+    {
+        for (var i = 0; i < panes.Count; i++)
+        {
+            if (string.Equals(panes[i].SessionName, session, StringComparison.Ordinal))
+                panes[i] = panes[i] with { WindowActive = false };
+        }
     }
 
     private WatchRow? HighlightedRow(FrameState frame) =>
@@ -534,7 +706,7 @@ public sealed class WatcherApp
             number[row.Id] = n++;
 
         var main = BuildRowTable(
-            "tmux-watch - agent panes  (up/down = select · enter/key = switch · a = ack · p = pause · o = others · c = companions · w = wide · q = quit)",
+            "tmux-watch - agent panes  (up/down = select · enter/key = switch · a = ack · n = new window · p = pause · o = others · c = companions · w = wide · q = quit)",
             layout.Agent, number, now, _wideMode, _highlightedId);
 
         if (layout.All.Count == 0)
@@ -558,8 +730,33 @@ public sealed class WatcherApp
                 "Paused  (highlight a row and press p to resume)",
                 layout.Paused, number, now, _wideMode, _highlightedId));
 
+        // The prompt rides below the tables inside the same live view, so the tables stay
+        // on screen and keep refreshing while the user types.
+        if (_prompt is { } editor)
+            parts.Add(BuildPromptLine(editor, _promptSession));
+
         return parts.Count == 1 ? main : new Rows(parts);
     }
+
+    /// <summary>
+    /// The name prompt as it appears under the tables: the captured target session (so
+    /// the user can see where the window lands), the entered text with the cursor drawn
+    /// in place, and the keys that close it.
+    /// </summary>
+    internal static IRenderable BuildPromptLine(LineEditor editor, string session) =>
+        new Markup(
+            $"[yellow]New window in[/] [bold]{Markup.Escape(session)}[/]  " +
+            $"[grey]name ›[/] {Markup.Escape(editor.Before)}[invert]{Caret(editor)}[/]" +
+            $"{Markup.Escape(CaretTail(editor))}   " +
+            "[grey]enter = create · esc = cancel[/]");
+
+    /// <summary>The character sitting under the cursor, or a space at end of line.</summary>
+    private static string Caret(LineEditor editor) =>
+        Markup.Escape(editor.After.Length > 0 ? editor.After[..1] : " ");
+
+    /// <summary>What follows the cursor, once the caret has consumed its character.</summary>
+    private static string CaretTail(LineEditor editor) =>
+        editor.After.Length > 1 ? editor.After[1..] : "";
 
     private static Table BuildRowTable(
         string title,

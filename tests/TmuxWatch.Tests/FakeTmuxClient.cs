@@ -19,6 +19,15 @@ public sealed class FakeTmuxClient : ITmuxClient
     public List<string> SelectedWindows { get; } = new();
     public List<string> SelectedPanes { get; } = new();
 
+    /// <summary>Windows the fake was asked to create, so tests can assert which session
+    /// was targeted and what name (if any) was passed.</summary>
+    public List<(string Session, string? Name)> CreatedWindows { get; } = new();
+
+    /// <summary>Window id the fake reports for a create, mirroring tmux's -P -F output.</summary>
+    public string NewWindowId { get; set; } = "@9";
+
+    public bool NewWindowFails { get; set; }
+
     /// <summary>Pane ids the fake was asked to capture, so tests can assert that the
     /// non-agent inventory is never captured.</summary>
     public List<string> CapturedPanes { get; } = new();
@@ -58,5 +67,13 @@ public sealed class FakeTmuxClient : ITmuxClient
     {
         SelectedPanes.Add(paneId);
         return new TmuxResult(true, 0, "", "");
+    }
+
+    public TmuxResult NewWindow(string sessionName, string? windowName)
+    {
+        CreatedWindows.Add((sessionName, windowName));
+        return NewWindowFails
+            ? new TmuxResult(true, 1, "", "can't create window")
+            : new TmuxResult(true, 0, NewWindowId + "\n", "");
     }
 }
