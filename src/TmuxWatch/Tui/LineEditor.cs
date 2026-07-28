@@ -20,6 +20,12 @@ internal enum LineEditorOutcome
 /// </summary>
 internal readonly record struct LineEditor(string Text, int Cursor)
 {
+    // Normalised on construction so a directly built editor cannot start out of range.
+    // (A `with` expression copies fields and bypasses this, but every such use here moves
+    // the cursor through the clamped helpers below.)
+    public string Text { get; init; } = Text ?? "";
+    public int Cursor { get; init; } = Math.Clamp(Cursor, 0, (Text ?? "").Length);
+
     public static readonly LineEditor Empty = new("", 0);
 
     /// <summary>The text before the cursor, used to render the caret in place.</summary>
@@ -77,17 +83,45 @@ internal readonly record struct LineEditor(string Text, int Cursor)
             : (Insert(key.KeyChar), LineEditorOutcome.Editing);
     }
 
-    private LineEditor Move(int delta) =>
-        this with { Cursor = Math.Clamp(Cursor + delta, 0, Text.Length) };
+    // Text is UTF-16, so a character outside the BMP (an emoji, say) occupies two chars.
+    // Cursor movement and deletion step over the whole pair, otherwise backspacing once
+    // would leave half of it behind and render as a replacement character. Insertion needs
+    // no such care: Console.ReadKey delivers the halves in order, and inserting each at the
+    // advancing cursor reassembles them.
+    private int StepBack(int from) =>
+        from >= 2 && char.IsLowSurrogate(Text[from - 1]) && char.IsHighSurrogate(Text[from - 2])
+            ? 2
+            : 1;
+
+    private int StepForward(int from) =>
+        from + 1 < Text.Length && char.IsHighSurrogate(Text[from]) && char.IsLowSurrogate(Text[from + 1])
+            ? 2
+            : 1;
+
+    private LineEditor Move(int delta)
+    {
+        if (delta < 0)
+            return Cursor == 0 ? this : this with { Cursor = Cursor - StepBack(Cursor) };
+        return Cursor >= Text.Length ? this : this with { Cursor = Cursor + StepForward(Cursor) };
+    }
 
     private LineEditor Insert(char c) =>
         new(Text.Insert(Cursor, c.ToString()), Cursor + 1);
 
-    private LineEditor DeleteBefore() =>
-        Cursor == 0 ? this : new(Text.Remove(Cursor - 1, 1), Cursor - 1);
+    private LineEditor DeleteBefore()
+    {
+        if (Cursor == 0)
+            return this;
+        var width = StepBack(Cursor);
+        return new(Text.Remove(Cursor - width, width), Cursor - width);
+    }
 
-    private LineEditor DeleteAfter() =>
-        Cursor >= Text.Length ? this : this with { Text = Text.Remove(Cursor, 1) };
+    private LineEditor DeleteAfter()
+    {
+        if (Cursor >= Text.Length)
+            return this;
+        return this with { Text = Text.Remove(Cursor, StepForward(Cursor)) };
+    }
 
     /// <summary>
     /// ctrl+w: drop the word before the cursor. Any run of spaces immediately before the

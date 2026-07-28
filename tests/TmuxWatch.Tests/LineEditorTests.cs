@@ -216,6 +216,37 @@ public class LineEditorTests
     }
 
     [Fact]
+    public void A_surrogate_pair_is_typed_deleted_and_stepped_over_as_one_character()
+    {
+        // Console.ReadKey delivers a non-BMP character as its two UTF-16 halves, so the
+        // editor must not let a single backspace or arrow split the pair.
+        const string emoji = "\U0001F680"; // rocket, 2 chars
+        var editor = Typed($"a{emoji}b");
+        Assert.Equal(4, editor.Text.Length);
+
+        // Left from the end steps over 'b', then over the whole pair.
+        var moved = Press(editor, ConsoleKey.LeftArrow, 2);
+        Assert.Equal(1, moved.Cursor);
+
+        // Backspace from just after the pair removes both halves at once.
+        var back = Press(editor, ConsoleKey.LeftArrow).Apply(Key(ConsoleKey.Backspace)).Editor;
+        Assert.Equal("ab", back.Text);
+        Assert.Equal(1, back.Cursor);
+
+        // Delete from just before it does the same.
+        var fwd = moved.Apply(Key(ConsoleKey.Delete)).Editor;
+        Assert.Equal("ab", fwd.Text);
+        Assert.Equal(1, fwd.Cursor);
+    }
+
+    [Fact]
+    public void A_directly_constructed_editor_has_its_cursor_clamped()
+    {
+        Assert.Equal(3, new LineEditor("abc", 99).Cursor);
+        Assert.Equal(0, new LineEditor("abc", -5).Cursor);
+    }
+
+    [Fact]
     public void Before_and_after_split_at_the_cursor_for_rendering()
     {
         var editor = Press(Typed("scratch"), ConsoleKey.LeftArrow, 3);

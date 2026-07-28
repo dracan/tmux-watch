@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -128,7 +129,11 @@ public sealed class WatcherApp
     {
         var pollMs = (int)(_cfg.PollIntervalSeconds * 1000);
 
-        using var buffered = BufferStdout();
+        // Deliberately not disposed: disposing a writer over Console.OpenStandardOutput()
+        // closes stdout itself, which would silently swallow anything written after Run
+        // returns - a stack trace from an unhandled exception, most importantly. Flushing
+        // is all that is needed, and the finally below does it.
+        var buffered = BufferStdout();
 
         // Start on a clean screen so the watcher is the only thing in the terminal,
         // regardless of how it was launched (go scripts, dotnet run, published binary).
@@ -147,7 +152,12 @@ public sealed class WatcherApp
                     while (!token.IsCancellationRequested)
                     {
                         var snapshot = _monitor.Tick();
-                        frame.Error = snapshot.Error ?? frame.Error;
+                        // Each tick contacts tmux and reports authoritatively, so the
+                        // snapshot replaces the error rather than merging with it -
+                        // carrying the previous one forward left a resolved failure (and,
+                        // once n existed, a one-off create failure) pinned to the caption
+                        // for the rest of the session.
+                        frame.Error = snapshot.Error;
                         frame.AgentViews = snapshot.Panes.ToList();
                         frame.OtherPanes = snapshot.OtherPanes.ToList();
 
@@ -369,6 +379,56 @@ public sealed class WatcherApp
         return -1;
     }
 
+    /// <summary>What a keystroke means, once the modal state has been taken into account.</summary>
+    internal enum KeyAction
+    {
+        Ignore,
+        PromptInput,
+        Quit,
+        MoveUp,
+        MoveDown,
+        ActivateHighlighted,
+        AddressRow,
+        TogglePauseRow,
+        ToggleWide,
+        ToggleOthers,
+        ToggleCompanions,
+        AcknowledgeRow,
+        OpenNewWindowPrompt,
+    }
+
+    /// <summary>
+    /// What <paramref name="key"/> means right now. Pure, so the modal rule is testable:
+    /// while the name prompt is open <em>every</em> keystroke is prompt input, which is
+    /// what stops `q` quitting, esc exiting the app rather than the prompt, and digits
+    /// jumping to a row, mid-name.
+    /// </summary>
+    internal static KeyAction ClassifyKey(ConsoleKeyInfo key, bool promptOpen)
+    {
+        if (promptOpen)
+            return KeyAction.PromptInput;
+
+        if (key.Key is ConsoleKey.Q or ConsoleKey.Escape)
+            return KeyAction.Quit;
+        if (key.Key == ConsoleKey.UpArrow)
+            return KeyAction.MoveUp;
+        if (key.Key == ConsoleKey.DownArrow)
+            return KeyAction.MoveDown;
+        if (key.Key == ConsoleKey.Enter)
+            return KeyAction.ActivateHighlighted;
+
+        return key.KeyChar switch
+        {
+            'p' => KeyAction.TogglePauseRow,
+            'w' => KeyAction.ToggleWide,
+            'o' => KeyAction.ToggleOthers,
+            'c' => KeyAction.ToggleCompanions,
+            'a' => KeyAction.AcknowledgeRow,
+            'n' => KeyAction.OpenNewWindowPrompt,
+            _ => IndexForAddressKey(key.KeyChar) >= 0 ? KeyAction.AddressRow : KeyAction.Ignore,
+        };
+    }
+
     /// <summary>Returns true if the user asked to quit.</summary>
     private bool WaitAndHandleKeys(
         int pollMs,
@@ -376,8 +436,11 @@ public sealed class WatcherApp
         LiveDisplayContext ctx,
         CancellationToken token)
     {
-        var elapsed = 0;
-        while (elapsed < pollMs && !token.IsCancellationRequested)
+        // Measured rather than accumulated from the nominal slice: Thread.Sleep overshoots,
+        // so adding the requested figure stretched the poll interval well past pollMs -
+        // most visibly with the short slice used while the prompt is open.
+        var clock = Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < pollMs && !token.IsCancellationRequested)
         {
             var promptDirty = false;
             try
@@ -389,95 +452,95 @@ public sealed class WatcherApp
                 {
                     var key = Console.ReadKey(intercept: true);
 
-                    // The name prompt is modal and must be tested before anything else:
-                    // while it is open, q is a character rather than quit and esc cancels
-                    // the prompt rather than the app.
-                    if (_prompt is not null)
+                    switch (ClassifyKey(key, _prompt is not null))
                     {
-                        // Rendering is deferred to once per drain: a full table rebuild
-                        // per keystroke is wasted work when several are already queued.
-                        promptDirty |= HandlePromptKey(key, frame, ctx);
-                        continue;
-                    }
+                        case KeyAction.PromptInput:
+                            // Rendering is deferred to once per drain: a full table
+                            // rebuild per keystroke is wasted work when several are
+                            // already queued.
+                            promptDirty |= HandlePromptKey(key, frame, ctx);
+                            break;
 
-                    if (key.Key is ConsoleKey.Q or ConsoleKey.Escape)
-                        return true;
+                        case KeyAction.Quit:
+                            return true;
 
-                    if (key.Key is ConsoleKey.UpArrow or ConsoleKey.DownArrow)
-                    {
-                        // Walk the visible rows as one continuous list across all tables.
-                        MoveHighlight(frame, key.Key == ConsoleKey.UpArrow ? -1 : 1);
-                        Render(frame, ctx);
-                    }
-                    else if (key.Key == ConsoleKey.Enter)
-                    {
-                        Activate(frame, _highlightIndex, ctx);
-                    }
-                    else if (key.KeyChar == 'p')
-                    {
-                        // Park (or resume) the highlighted row. Re-order so it moves
-                        // between its table and the Paused table immediately, and
-                        // re-evaluate the pointer cue so pausing a waiting pane
-                        // clears it (and resuming re-arms it) without waiting a tick.
-                        // A non-agent row has no cue, so this is purely decluttering.
-                        if (TogglePause(_paused, HighlightedRow(frame)?.Id))
-                        {
+                        case KeyAction.MoveUp:
+                        case KeyAction.MoveDown:
+                            // Walk the visible rows as one continuous list across all tables.
+                            MoveHighlight(frame, key.Key == ConsoleKey.UpArrow ? -1 : 1);
+                            Render(frame, ctx);
+                            break;
+
+                        case KeyAction.ActivateHighlighted:
+                            Activate(frame, _highlightIndex, ctx);
+                            break;
+
+                        case KeyAction.AddressRow:
+                            Activate(frame, IndexForAddressKey(key.KeyChar), ctx);
+                            break;
+
+                        case KeyAction.TogglePauseRow:
+                            // Park (or resume) the highlighted row. Re-order so it moves
+                            // between its table and the Paused table immediately, and
+                            // re-evaluate the pointer cue so pausing a waiting pane
+                            // clears it (and resuming re-arms it) without waiting a tick.
+                            // A non-agent row has no cue, so this is purely decluttering.
+                            if (TogglePause(_paused, HighlightedRow(frame)?.Id))
+                            {
+                                Rebuild(frame);
+                                Render(frame, ctx);
+                                DrivePointer(frame.AgentViews);
+                            }
+                            break;
+
+                        case KeyAction.ToggleWide:
+                            // Toggle wide mode, which shows/hides the Path and Loc
+                            // columns. Re-render immediately so the change is visible.
+                            _wideMode = !_wideMode;
+                            Render(frame, ctx);
+                            break;
+
+                        case KeyAction.ToggleOthers:
+                            _showOtherPanes = !_showOtherPanes;
                             Rebuild(frame);
                             Render(frame, ctx);
-                            DrivePointer(frame.AgentViews);
-                        }
-                    }
-                    else if (key.KeyChar == 'w')
-                    {
-                        // Toggle wide mode, which shows/hides the Path and Loc
-                        // columns. Re-render immediately so the change is visible.
-                        _wideMode = !_wideMode;
-                        Render(frame, ctx);
-                    }
-                    else if (key.KeyChar == 'o')
-                    {
-                        _showOtherPanes = !_showOtherPanes;
-                        Rebuild(frame);
-                        Render(frame, ctx);
-                    }
-                    else if (key.KeyChar == 'c')
-                    {
-                        // Inert while the other-panes table is hidden: Rebuild simply
-                        // produces the same (empty) row set.
-                        _showCompanionPanes = !_showCompanionPanes;
-                        Rebuild(frame);
-                        Render(frame, ctx);
-                    }
-                    else if (key.KeyChar == 'a')
-                    {
-                        // Acknowledge the highlighted row if it is DONE, without switching
-                        // to it - the keystroke is what clears it, so a pane that
-                        // already holds focus is never auto-acknowledged. Re-render and
-                        // re-drive the pointer so the green cue clears immediately.
-                        var row = HighlightedRow(frame);
-                        if (row is { IsAgent: true } && _monitor.Acknowledge(row.Id))
-                        {
-                            ApplyOptimisticAck(frame.AgentViews, row.Id);
+                            break;
+
+                        case KeyAction.ToggleCompanions:
+                            // Inert while the other-panes table is hidden: Rebuild simply
+                            // produces the same (empty) row set.
+                            _showCompanionPanes = !_showCompanionPanes;
                             Rebuild(frame);
                             Render(frame, ctx);
-                            DrivePointer(frame.AgentViews);
-                        }
-                    }
-                    else if (key.KeyChar == 'n')
-                    {
-                        // Open the name prompt against the session resolved right now.
-                        // Nothing is created until submit, and nothing at all happens
-                        // when there is no row to derive a session from.
-                        if (ResolveTargetSession(frame.Layout.All, _highlightedId) is { } session)
-                        {
-                            _prompt = LineEditor.Empty;
-                            _promptSession = session;
-                            Render(frame, ctx);
-                        }
-                    }
-                    else if (IndexForAddressKey(key.KeyChar) is var index and >= 0)
-                    {
-                        Activate(frame, index, ctx);
+                            break;
+
+                        case KeyAction.AcknowledgeRow:
+                            // Acknowledge the highlighted row if it is DONE, without
+                            // switching to it - the keystroke is what clears it, so a pane
+                            // that already holds focus is never auto-acknowledged.
+                            // Re-render and re-drive the pointer so the green cue clears
+                            // immediately.
+                            var row = HighlightedRow(frame);
+                            if (row is { IsAgent: true } && _monitor.Acknowledge(row.Id))
+                            {
+                                ApplyOptimisticAck(frame.AgentViews, row.Id);
+                                Rebuild(frame);
+                                Render(frame, ctx);
+                                DrivePointer(frame.AgentViews);
+                            }
+                            break;
+
+                        case KeyAction.OpenNewWindowPrompt:
+                            // Open the name prompt against the session resolved right now.
+                            // Nothing is created until submit, and nothing at all happens
+                            // when there is no row to derive a session from.
+                            if (ResolveTargetSession(frame.Layout.All, _highlightedId) is { } session)
+                            {
+                                _prompt = LineEditor.Empty;
+                                _promptSession = session;
+                                Render(frame, ctx);
+                            }
+                            break;
                     }
                 }
             }
@@ -492,9 +555,7 @@ public sealed class WatcherApp
             // The sleep is what bounds how soon a keystroke is noticed, so it shortens
             // while the prompt is open - 50ms of latency per character is felt as lag,
             // and the tighter poll only runs while someone is actually typing.
-            var slice = _prompt is not null ? 8 : 50;
-            Thread.Sleep(slice);
-            elapsed += slice;
+            Thread.Sleep(_prompt is not null ? 8 : 50);
         }
         return false;
     }
@@ -550,6 +611,10 @@ public sealed class WatcherApp
             Render(frame, ctx);
             return;
         }
+
+        // Clear a previous failure straight away rather than leaving it up until the next
+        // poll overwrites it.
+        frame.Error = null;
 
         // The new window holds focus now, but it has no row until the next poll enumerates
         // it, so no visible row should keep the marker. Clearing it across the target

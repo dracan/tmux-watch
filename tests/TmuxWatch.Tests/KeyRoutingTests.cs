@@ -1,0 +1,87 @@
+using TmuxWatch.Tui;
+
+namespace TmuxWatch.Tests;
+
+/// <summary>
+/// The modal rule: while the name prompt is open every keystroke belongs to it, so no
+/// command runs and no row is addressed mid-name. Classification is pure, so the rule is
+/// pinned here rather than inferred from the key loop.
+/// </summary>
+public class KeyRoutingTests
+{
+    private static ConsoleKeyInfo Char(char c) => new(c, ConsoleKey.None, false, false, false);
+
+    private static ConsoleKeyInfo Key(ConsoleKey key) => new('\0', key, false, false, false);
+
+    private static WatcherApp.KeyAction Closed(ConsoleKeyInfo key) =>
+        WatcherApp.ClassifyKey(key, promptOpen: false);
+
+    private static WatcherApp.KeyAction Open(ConsoleKeyInfo key) =>
+        WatcherApp.ClassifyKey(key, promptOpen: true);
+
+    [Fact]
+    public void Commands_route_normally_while_the_prompt_is_closed()
+    {
+        Assert.Equal(WatcherApp.KeyAction.TogglePauseRow, Closed(Char('p')));
+        Assert.Equal(WatcherApp.KeyAction.ToggleWide, Closed(Char('w')));
+        Assert.Equal(WatcherApp.KeyAction.ToggleOthers, Closed(Char('o')));
+        Assert.Equal(WatcherApp.KeyAction.ToggleCompanions, Closed(Char('c')));
+        Assert.Equal(WatcherApp.KeyAction.AcknowledgeRow, Closed(Char('a')));
+        Assert.Equal(WatcherApp.KeyAction.OpenNewWindowPrompt, Closed(Char('n')));
+        Assert.Equal(WatcherApp.KeyAction.Quit, Closed(Key(ConsoleKey.Q)));
+        Assert.Equal(WatcherApp.KeyAction.Quit, Closed(Key(ConsoleKey.Escape)));
+        Assert.Equal(WatcherApp.KeyAction.MoveUp, Closed(Key(ConsoleKey.UpArrow)));
+        Assert.Equal(WatcherApp.KeyAction.MoveDown, Closed(Key(ConsoleKey.DownArrow)));
+        Assert.Equal(WatcherApp.KeyAction.ActivateHighlighted, Closed(Key(ConsoleKey.Enter)));
+    }
+
+    [Theory]
+    [InlineData('1')]
+    [InlineData('9')]
+    [InlineData('A')]
+    [InlineData('Z')]
+    public void Address_keys_route_to_a_row_while_the_prompt_is_closed(char c) =>
+        Assert.Equal(WatcherApp.KeyAction.AddressRow, Closed(Char(c)));
+
+    [Theory]
+    [InlineData('q')]   // would otherwise quit
+    [InlineData('p')]
+    [InlineData('a')]
+    [InlineData('n')]
+    [InlineData('o')]
+    [InlineData('c')]
+    [InlineData('w')]
+    [InlineData('1')]   // would otherwise jump to a row
+    [InlineData('A')]
+    [InlineData('z')]
+    public void Every_character_is_prompt_input_while_the_prompt_is_open(char c) =>
+        Assert.Equal(WatcherApp.KeyAction.PromptInput, Open(Char(c)));
+
+    [Theory]
+    [InlineData(ConsoleKey.Q)]
+    [InlineData(ConsoleKey.Escape)]
+    [InlineData(ConsoleKey.Enter)]
+    [InlineData(ConsoleKey.UpArrow)]
+    [InlineData(ConsoleKey.DownArrow)]
+    [InlineData(ConsoleKey.Backspace)]
+    [InlineData(ConsoleKey.F5)]
+    public void Named_keys_are_prompt_input_too_while_it_is_open(ConsoleKey key) =>
+        Assert.Equal(WatcherApp.KeyAction.PromptInput, Open(Key(key)));
+
+    [Fact]
+    public void Escape_cancels_the_prompt_rather_than_the_app()
+    {
+        // The distinction that matters: esc reaches the editor (which turns it into a
+        // cancel) instead of being read as quit.
+        Assert.Equal(WatcherApp.KeyAction.Quit, Closed(Key(ConsoleKey.Escape)));
+        Assert.Equal(WatcherApp.KeyAction.PromptInput, Open(Key(ConsoleKey.Escape)));
+    }
+
+    [Fact]
+    public void Unbound_keys_are_ignored_while_the_prompt_is_closed()
+    {
+        Assert.Equal(WatcherApp.KeyAction.Ignore, Closed(Key(ConsoleKey.F5)));
+        Assert.Equal(WatcherApp.KeyAction.Ignore, Closed(Char('z')));
+        Assert.Equal(WatcherApp.KeyAction.Ignore, Closed(Char('0')));
+    }
+}
