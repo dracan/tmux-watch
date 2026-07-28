@@ -55,4 +55,46 @@ public class TmuxRunnerTests
         Assert.Throws<InvalidOperationException>(() => runner.Run("kill-window", "-t", "work:1"));
         Assert.Throws<InvalidOperationException>(() => runner.Run("rename-window", "-t", "work:1", "x"));
     }
+
+    [Theory]
+    [InlineData("work")]
+    [InlineData("0")]
+    [InlineData("9")]
+    public void New_window_targets_a_session_not_a_window_index(string session)
+    {
+        // Regression: -t on new-window is a target *window*. A bare session name that
+        // parses as a number is taken as a window index in whatever session is current,
+        // so "0" (tmux's default name for an unnamed session) created the window in the
+        // wrong session, or failed with "index 0 in use". The trailing colon is what
+        // makes the target unambiguously a session.
+        var args = TmuxRunner.NewWindowArgs(session, "scratch");
+
+        var target = args[Array.IndexOf(args, "-t") + 1];
+        Assert.Equal(session + ":", target);
+    }
+
+    [Fact]
+    public void New_window_puts_the_name_in_the_name_slot_and_adds_no_command()
+    {
+        var args = TmuxRunner.NewWindowArgs("work", "-rf; rm important");
+
+        // The name is the value of -n, never a trailing shell command: new-window takes
+        // one as its last positional argument, and nothing may ever land there.
+        Assert.Equal("-n", args[^2]);
+        Assert.Equal("-rf; rm important", args[^1]);
+        Assert.Equal("new-window", args[0]);
+        Assert.Contains("-d", args);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void New_window_omits_the_name_flag_when_there_is_no_name(string? name)
+    {
+        var args = TmuxRunner.NewWindowArgs("work", name);
+
+        Assert.DoesNotContain("-n", args);
+        Assert.Equal("work:", args[^1]);
+    }
 }

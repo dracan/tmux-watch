@@ -359,6 +359,11 @@ other pane and, running no agent, appears as a row in the Other panes table.
 - **WHEN** the user presses `n`, types a name, and presses enter
 - **THEN** the system creates a detached window with that name in the target session, then switches to that session and selects the newly created window by the id reported for it
 
+#### Scenario: Window lands in the named session whatever it is called
+
+- **WHEN** the target session's name is one that could also be read as a window index, such as `0`
+- **THEN** the window is still created in that session, rather than at that index in whichever session the multiplexer currently considers active
+
 #### Scenario: Jump degrades without a reported window id
 
 - **WHEN** the multiplexer reports no window id for the create

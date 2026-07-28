@@ -316,13 +316,16 @@ public sealed class WatcherApp
         LiveDisplayContext ctx,
         CancellationToken token)
     {
-        const int slice = 50;
         var elapsed = 0;
         while (elapsed < pollMs && !token.IsCancellationRequested)
         {
+            var promptDirty = false;
             try
             {
-                if (Console.KeyAvailable)
+                // Drain every keystroke that has arrived, rather than one per slice. One
+                // key per sleep caps input at 20 characters a second and makes fast typing
+                // in the name prompt arrive in visible bursts.
+                while (Console.KeyAvailable)
                 {
                     var key = Console.ReadKey(intercept: true);
 
@@ -331,9 +334,9 @@ public sealed class WatcherApp
                     // the prompt rather than the app.
                     if (_prompt is not null)
                     {
-                        HandlePromptKey(key, frame, ctx);
-                        Thread.Sleep(slice);
-                        elapsed += slice;
+                        // Rendering is deferred to once per drain: a full table rebuild
+                        // per keystroke is wasted work when several are already queued.
+                        promptDirty |= HandlePromptKey(key, frame, ctx);
                         continue;
                     }
 
@@ -423,6 +426,13 @@ public sealed class WatcherApp
                 // Console input redirected; ignore key handling.
             }
 
+            if (promptDirty)
+                Render(frame, ctx);
+
+            // The sleep is what bounds how soon a keystroke is noticed, so it shortens
+            // while the prompt is open - 50ms of latency per character is felt as lag,
+            // and the tighter poll only runs while someone is actually typing.
+            var slice = _prompt is not null ? 8 : 50;
             Thread.Sleep(slice);
             elapsed += slice;
         }
@@ -432,9 +442,11 @@ public sealed class WatcherApp
     /// <summary>
     /// Feed one keystroke to the open name prompt. Submitting creates the window in the
     /// session captured when the prompt opened and jumps to it; cancelling closes the
-    /// prompt without touching tmux at all.
+    /// prompt without touching tmux at all. Returns true when the caller still owes a
+    /// render - the editing case, which is coalesced to one redraw per batch of keys.
+    /// Submit and cancel render here, since they are terminal and happen once.
     /// </summary>
-    private void HandlePromptKey(ConsoleKeyInfo key, FrameState frame, LiveDisplayContext ctx)
+    private bool HandlePromptKey(ConsoleKeyInfo key, FrameState frame, LiveDisplayContext ctx)
     {
         var (editor, outcome) = _prompt!.Value.Apply(key);
         var session = _promptSession;
@@ -445,17 +457,16 @@ public sealed class WatcherApp
                 var name = editor.Text.Trim();
                 ClosePrompt();
                 CreateWindow(session, name, frame, ctx);
-                break;
+                return false;
 
             case LineEditorOutcome.Cancel:
                 ClosePrompt();
                 Render(frame, ctx);
-                break;
+                return false;
 
             default:
                 _prompt = editor;
-                Render(frame, ctx);
-                break;
+                return true;
         }
     }
 
