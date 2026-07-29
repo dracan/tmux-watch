@@ -53,7 +53,9 @@ static void PrintOnce(MonitorSnapshot snap)
 {
     if (snap.Error is not null)
         AnsiConsole.MarkupLine($"[red]{Markup.Escape(snap.Error)}[/]");
-    foreach (var p in snap.Panes.OrderBy(p => p.State))
+    // Same attention-first ordering as the live tables. Sorting by the enum's own value
+    // would order by declaration, which is grouped for readability rather than urgency.
+    foreach (var p in snap.Panes.OrderBy(p => WatcherApp.Priority(p.State)))
         AnsiConsole.MarkupLine($"{(p.Pane.IsFocused ? "[green]►[/]" : " ")} {Markup.Escape(p.Pane.Location)}\t{Markup.Escape(p.Pane.AgentId)}\t{Markup.Escape(p.Pane.DisplayName)}\t{p.State}\t{Markup.Escape(p.Pane.Command)}");
     if (snap.Panes.Count == 0 && snap.Error is null)
         AnsiConsole.MarkupLine("[grey]No agent panes found.[/]");

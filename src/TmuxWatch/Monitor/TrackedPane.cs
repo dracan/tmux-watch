@@ -37,6 +37,27 @@ internal sealed class TrackedPane
     /// held state is abandoned and Unknown is surfaced.</summary>
     public int ConsecutiveUnknowns { get; set; }
 
+    /// <summary>
+    /// This pane finished a turn that has not been announced yet, because it ended into a
+    /// live background task (WORKING → BACKGND). It is what distinguishes "finished
+    /// while you were away" from "has had a dev server up since before the watcher
+    /// started", and so what makes either exit from BACKGND worth a chime.
+    ///
+    /// Starts false, which is how first sight stays silent: a pane discovered already in
+    /// BACKGND has no observed completed turn, so neither its shell exiting nor the grace
+    /// period expiring announces anything - the same principle that keeps a freshly
+    /// discovered IDLE pane out of DONE.
+    /// </summary>
+    public bool CompletionPending { get; set; }
+
+    /// <summary>
+    /// When the pane most recently entered BACKGND, used for the grace-period fallback.
+    /// Distinct from <see cref="EnteredAt"/> because that is only assigned after the
+    /// promotion decision has been made: on the WORKING → BACKGND tick it still holds the
+    /// WORKING entry time, which could satisfy the grace period immediately.
+    /// </summary>
+    public DateTimeOffset? BackgndSince { get; set; }
+
     public TrackedPaneView ToView() =>
         new(Pane, State, EnteredAt, AttentionOutstanding);
 }

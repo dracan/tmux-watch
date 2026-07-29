@@ -85,4 +85,13 @@ public class WatcherPointerTests
         };
         Assert.Equal(PointerState.Normal, Aggregate(panes));
     }
+
+    [Fact]
+    public void Backgnd_pane_does_not_arm_the_cue()
+    {
+        // A pane holding a background shell has not asked for the user yet; it will
+        // announce itself as DONE when it has.
+        var panes = new List<TrackedPaneView> { View("%1", PaneState.Backgnd) };
+        Assert.Equal(PointerState.Normal, Aggregate(panes));
+    }
 }

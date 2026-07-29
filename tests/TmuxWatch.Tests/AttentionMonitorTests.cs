@@ -427,4 +427,236 @@ public class AttentionMonitorTests
         Assert.NotNull(snap.Error);
         Assert.Single(snap.Panes);             // prior state retained
     }
+
+    // ---- BACKGND: the deferred completed-turn announcement -----------------
+
+    private const string ClaudePane = "%1|s|0|0|claude|0";
+
+    private const string ClaudeWorking =
+        "● Earlier output\n ✻ Enchanting… (32s · ↓ 1.4k tokens)\n────\n❯\n────\n  -- INSERT --";
+
+    private const string ClaudeBackgnd =
+        "● Earlier output\n────\n❯\n────\n  -- INSERT -- ⏵⏵ auto mode on · 1 shell · ← for agents";
+
+    private const string ClaudeIdle =
+        "● Earlier output\n────\n❯\n────\n  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents";
+
+    private const string ClaudeWaiting =
+        "❯ 1. Yes\n↑/↓ to navigate · enter to select · esc to cancel";
+
+    private static readonly TimeSpan PastGrace = TimeSpan.FromSeconds(121);
+
+    [Fact]
+    public void Finishing_a_turn_into_a_live_shell_is_silent()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();                        // working
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        var snap = monitor.Tick();
+
+        Assert.Equal(PaneState.Backgnd, Assert.Single(snap.Panes).State);
+        Assert.Empty(snap.Events);             // the chime is deferred, not fired
+        Assert.False(snap.Panes[0].AttentionOutstanding);
+    }
+
+    [Fact]
+    public void Shell_exiting_releases_the_held_announcement_once()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        monitor.Tick();                        // silent
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;      // shell exited
+        var snap = monitor.Tick();
+
+        Assert.Equal(PaneState.Done, Assert.Single(snap.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(snap.Events).Kind);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Empty(monitor.Tick().Events);   // and only once
+    }
+
+    [Fact]
+    public void Grace_period_releases_a_shell_that_never_exits()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);              // the shell is a dev server; it never exits
+        var snap = monitor.Tick();
+
+        Assert.Equal(PaneState.Done, Assert.Single(snap.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(snap.Events).Kind);
+    }
+
+    [Fact]
+    public void Grace_promotion_is_not_undone_by_continuing_backgnd()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);
+        monitor.Tick();                        // promoted to DONE, chimed
+
+        // The shell is still running, so the classifier keeps reporting BACKGND. DONE has
+        // to persist across it or the announcement undoes itself on the next poll.
+        for (var i = 0; i < 3; i++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(2));
+            var snap = monitor.Tick();
+            Assert.Equal(PaneState.Done, Assert.Single(snap.Panes).State);
+            Assert.Empty(snap.Events);
+        }
+    }
+
+    [Fact]
+    public void First_sight_backgnd_never_announces_on_shell_exit()
+    {
+        // A dev server that predates the watcher. No completed turn was observed, so its
+        // shell exiting is not news.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeBackgnd;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();                        // first sight: backgnd
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;
+        var snap = monitor.Tick();
+
+        Assert.Equal(PaneState.Idle, Assert.Single(snap.Panes).State);
+        Assert.Empty(snap.Events);
+    }
+
+    [Fact]
+    public void First_sight_backgnd_never_announces_on_grace_expiry()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeBackgnd;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(PastGrace);
+        var snap = monitor.Tick();
+
+        Assert.Equal(PaneState.Backgnd, Assert.Single(snap.Panes).State);
+        Assert.Empty(snap.Events);
+    }
+
+    [Fact]
+    public void A_new_turn_re_arms_rather_than_double_firing()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;   // turn 1 finishes, held
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeWorking;   // user starts turn 2; turn 1's hold lapses
+        Assert.Empty(monitor.Tick().Events);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;   // turn 2 finishes, held again
+        Assert.Empty(monitor.Tick().Events);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;
+        var snap = monitor.Tick();
+
+        // Exactly one chime, for turn 2 - not two, and not zero.
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(snap.Events).Kind);
+    }
+
+    [Fact]
+    public void Blocking_prompt_during_backgnd_fires_only_waiting()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeWaiting;   // the agent came back with a question
+        var snap = monitor.Tick();
+
+        Assert.Equal(AttentionKind.EnteredWaiting, Assert.Single(snap.Events).Kind);
+
+        // The held completion is discarded, not queued behind the prompt: answering it
+        // and returning to idle must not produce a second, stale chime.
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;
+        Assert.Empty(monitor.Tick().Events);
+    }
+
+    [Fact]
+    public void Real_capture_shapes_drive_the_deferred_chime_end_to_end()
+    {
+        // The inline screens above are hand-written. This runs the same sequence through
+        // the actual fixture captures - real footer text, the non-breaking space after
+        // the composer glyph, the frozen "· 1 shell still running" transcript line - so
+        // the pipeline is exercised on the shape a live pane actually produces.
+        static string Fixture(string name) =>
+            File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", name));
+
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = Fixture("claude-working-current.txt");
+        var monitor = Build(fake, out var clock);
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Fixture("claude-backgnd.txt");
+        var held = monitor.Tick();
+        Assert.Equal(PaneState.Backgnd, Assert.Single(held.Panes).State);
+        Assert.Empty(held.Events);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Fixture("claude-idle.txt");   // the shell exited
+        var released = monitor.Tick();
+        Assert.Equal(PaneState.Done, Assert.Single(released.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(released.Events).Kind);
+    }
+
+    [Fact]
+    public void Backgnd_pane_cannot_be_acknowledged()
+    {
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        monitor.Tick();
+
+        Assert.False(monitor.Acknowledge("%1"));   // not DONE, so nothing to clear
+    }
 }

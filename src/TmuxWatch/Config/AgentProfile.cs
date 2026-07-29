@@ -76,7 +76,44 @@ public sealed class AgentProfile
     /// because the pane is busy, not awaiting the user). Empty disables it.</summary>
     public string WorkingBackgroundAgentsPattern { get; set; } = "";
 
-    /// <summary>Any one of these tokens in the status area indicates IDLE.</summary>
+    /// <summary>
+    /// Regex matching the agent's composer prompt line - the input caret the user types
+    /// at, e.g. a `❯` at the start of a line that is not the numbered selection cursor.
+    /// When set, this is the IDLE anchor and <see cref="IdleHints"/> is not consulted;
+    /// empty falls back to the hints.
+    ///
+    /// It is a sturdier anchor than any status-footer token because it is structure
+    /// rather than an affordance hint: it is present in every live state and in every
+    /// editor mode, and the agent has no reason to recycle its slot. Claude Code's footer
+    /// segments, by contrast, are all conditional - `? for shortcuts` renders only while
+    /// the composer is empty, and `(shift+tab to cycle)` is dropped whenever the footer
+    /// needs the space, including while a background shell runs. A pane hitting both at
+    /// once had no IDLE signal left and classified Unknown.
+    ///
+    /// The composer line also splits the screen into the agent's transcript (above) and
+    /// its chrome (below), which is what makes
+    /// <see cref="BackgroundTaskPattern"/> safe to match.
+    /// </summary>
+    public string IdlePromptPattern { get; set; } = "";
+
+    /// <summary>
+    /// Regex matching a background-task counter in the status chrome, e.g. the
+    /// `· 1 shell ·` or `· 2 monitors ·` the current Claude Code build renders while work
+    /// it started is still running after the turn ended. Both kinds share one footer slot
+    /// (`1 shell · 1 monitor`), and both mean the same thing here: the agent has handed
+    /// the turn back but its work has not finished. Empty disables BACKGND for this
+    /// profile.
+    ///
+    /// Only lines *below* the <see cref="IdlePromptPattern"/> match are searched. The
+    /// transcript above it routinely contains shell prose that would otherwise match -
+    /// a tool-use line (`Ran 1 shell command`) and, worse, an end-of-turn line
+    /// (`✻ Cooked for 16s · 1 shell still running`) that stays frozen on screen after the
+    /// shell has exited and would pin the pane in BACKGND indefinitely.
+    /// </summary>
+    public string BackgroundTaskPattern { get; set; } = "";
+
+    /// <summary>Any one of these tokens in the status area indicates IDLE. Used only when
+    /// <see cref="IdlePromptPattern"/> is empty.</summary>
     public List<string> IdleHints { get; set; } = new();
 
     // ---- Compiled helpers ---------------------------------------------------
@@ -104,6 +141,12 @@ public sealed class AgentProfile
 
     /// <summary>Compiled background-sub-agents qualifier, or null when none is configured.</summary>
     public Regex? CompileWorkingBackgroundAgents() => CompileOrNull(WorkingBackgroundAgentsPattern);
+
+    /// <summary>Compiled composer-prompt anchor, or null when none is configured.</summary>
+    public Regex? CompileIdlePrompt() => CompileOrNull(IdlePromptPattern);
+
+    /// <summary>Compiled background-task counter, or null when none is configured.</summary>
+    public Regex? CompileBackgroundTask() => CompileOrNull(BackgroundTaskPattern);
 
     private static Regex? CompileOrNull(string pattern) =>
         string.IsNullOrEmpty(pattern) ? null : new Regex(pattern, RegexOptions.Compiled);

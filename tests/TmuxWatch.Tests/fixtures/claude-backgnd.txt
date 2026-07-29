@@ -1,0 +1,17 @@
+● Synthetic fixture - a Claude Code pane whose turn has finished while one of its own
+  background shells is still running (no real content).
+
+  The footer drops the "(shift+tab to cycle)" segment to make room for the shell count,
+  so neither of the old idle hints is on screen. IDLE must come from the composer box.
+
+  The line below is the trap: it is frozen into the transcript above the composer and
+  survives the shell exiting, so matching it anywhere would pin the pane in BACKGND
+  forever. Only the chrome below the composer may be searched for the shell segment.
+
+✻ Cooked for 16s · 1 shell still running
+
+                                                          new task? /clear to save 12.3k tokens
+──────────────────────────────────────────────────────────────────── synthetic: fixture ──
+❯  commit this
+─────────────────────────────────────────────────────────────────────────────────────────────
+  -- INSERT -- ⏵⏵ auto mode on · 1 shell · ← for agents

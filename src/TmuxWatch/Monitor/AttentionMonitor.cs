@@ -24,8 +24,12 @@ public sealed record MonitorSnapshot(
 /// <see cref="Tick"/> performs one enumeration plus one read-only capture per
 /// matched agent pane, classifies it with its agent's profile, updates the per-pane
 /// state machine, and emits edge-triggered attention events (once on entering
-/// WAITING; optionally on entering IDLE). Holds state across ticks; the polling
+/// WAITING, once on entering DONE). Holds state across ticks; the polling
 /// cadence is owned by the caller.
+///
+/// BACKGND is quiet: entering it raises nothing. A turn that ends into a live background
+/// shell has its DONE promotion - and so its chime - deferred until the shell exits or
+/// the grace period expires. See <c>Promote</c>.
 /// </summary>
 public sealed class AttentionMonitor
 {
@@ -36,6 +40,7 @@ public sealed class AttentionMonitor
     private readonly IReadOnlyDictionary<string, PaneClassifier> _classifiers;
     private readonly int _missedEnumerationsBeforeDrop;
     private readonly int _unknownCapturesBeforeStale;
+    private readonly TimeSpan _backgroundGrace;
 
     private readonly Dictionary<string, TrackedPane> _tracked = new();
 
@@ -52,6 +57,7 @@ public sealed class AttentionMonitor
         _clock = clock ?? TimeProvider.System;
         _missedEnumerationsBeforeDrop = Math.Max(1, cfg.MissedEnumerationsBeforeDrop);
         _unknownCapturesBeforeStale = Math.Max(1, cfg.UnknownCapturesBeforeStale);
+        _backgroundGrace = TimeSpan.FromSeconds(Math.Max(0, cfg.BackgroundGraceSeconds));
         _classifiers = cfg.ResolveAgents()
             .ToDictionary(a => a.Id, a => new PaneClassifier(a, cfg.StatusLineCount));
     }
@@ -122,14 +128,7 @@ public sealed class AttentionMonitor
             if (classified != PaneState.Unknown)
                 tracked.ConsecutiveUnknowns = 0;
 
-            // Derive DONE (monitor-only; the classifier never emits it): a classified
-            // IDLE whose prior state was WORKING is a completed turn, and a pane already
-            // in DONE stays DONE while it keeps classifying IDLE. Any other path into
-            // IDLE (fresh pane above, or WAITING to IDLE) remains IDLE.
-            var state = classified;
-            if (classified == PaneState.Idle &&
-                tracked.State is PaneState.Working or PaneState.Done)
-                state = PaneState.Done;
+            var state = Promote(tracked, classified, now);
 
             if (tracked.State != state)
             {
@@ -157,6 +156,83 @@ public sealed class AttentionMonitor
         }
 
         return new MonitorSnapshot(SnapshotViews(), events, now, null, discovered.OtherPanes);
+    }
+
+    /// <summary>
+    /// Derive the tracked state from this tick's classification plus the pane's history.
+    /// DONE is monitor-only (the classifier never emits it) and is reached by two routes:
+    ///
+    /// - directly, when a classified IDLE follows WORKING - a turn that ended with nothing
+    ///   still running; and
+    /// - deferred, when a turn ended into a live background task (WORKING → BACKGND).
+    ///   That completion is held silent and released either when the shell exits (BACKGND
+    ///   → IDLE) or when the grace period expires, whichever comes first.
+    ///
+    /// Any other path into IDLE (a fresh pane, or WAITING → IDLE) remains IDLE, and any
+    /// path out of BACKGND without <see cref="TrackedPane.CompletionPending"/> announces
+    /// nothing - which is what keeps first sight silent.
+    /// </summary>
+    private PaneState Promote(TrackedPane tracked, PaneState classified, DateTimeOffset now)
+    {
+        switch (classified)
+        {
+            case PaneState.Backgnd:
+                if (tracked.State != PaneState.Backgnd)
+                    tracked.BackgndSince = now;
+
+                // A turn that ends into a live shell defers its announcement rather than
+                // firing it. Only WORKING arms this: entering BACKGND from IDLE (a shell
+                // the user started work for earlier) completed no turn we saw.
+                if (tracked.State == PaneState.Working)
+                    tracked.CompletionPending = true;
+
+                // Once promoted, DONE persists across BACKGND as well as IDLE. Without
+                // this a grace-period promotion would drop straight back to BACKGND on
+                // the very next poll and undo its own announcement.
+                if (tracked.State == PaneState.Done)
+                    return PaneState.Done;
+
+                // Grace-period release: the shell has outlived the deferral, so announce
+                // rather than let a dev server swallow the chime forever.
+                if (tracked.CompletionPending &&
+                    now - (tracked.BackgndSince ?? now) >= _backgroundGrace)
+                {
+                    tracked.CompletionPending = false;
+                    return PaneState.Done;
+                }
+
+                return PaneState.Backgnd;
+
+            case PaneState.Idle:
+                // Direct completion, a DONE pane still sitting idle, or the deferred
+                // completion released by the shell exiting.
+                if (tracked.State is PaneState.Working or PaneState.Done ||
+                    (tracked.State == PaneState.Backgnd && tracked.CompletionPending))
+                {
+                    tracked.CompletionPending = false;
+                    tracked.BackgndSince = null;
+                    return PaneState.Done;
+                }
+
+                tracked.BackgndSince = null;
+                return PaneState.Idle;
+
+            case PaneState.Working:
+                // A new turn has begun; it will arm its own completion when it ends.
+                tracked.CompletionPending = false;
+                tracked.BackgndSince = null;
+                return PaneState.Working;
+
+            case PaneState.Waiting:
+                // WAITING raises its own attention event, so any held completion is
+                // discarded rather than queued up to fire separately afterwards.
+                tracked.CompletionPending = false;
+                tracked.BackgndSince = null;
+                return PaneState.Waiting;
+
+            default:
+                return classified;
+        }
     }
 
     /// <summary>

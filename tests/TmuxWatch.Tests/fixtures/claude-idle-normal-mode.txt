@@ -1,0 +1,12 @@
+● Synthetic fixture - an idle Claude Code pane whose composer is in vim NORMAL mode
+  rather than INSERT (no real content).
+
+  The mode indicator is the leftmost footer segment and changes with the mode, which is
+  one more reason IDLE must not be read off the footer. The composer prompt below is
+  identical in both modes, so the anchor holds either way.
+
+                                                          new task? /clear to save 8.1k tokens
+──────────────────────────────────────────────────────────────────── synthetic: fixture ──
+❯  commit this
+─────────────────────────────────────────────────────────────────────────────────────────────
+  -- NORMAL -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

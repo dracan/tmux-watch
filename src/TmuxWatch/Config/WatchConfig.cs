@@ -46,6 +46,22 @@ public sealed class WatchConfig
     /// </summary>
     public int UnknownCapturesBeforeStale { get; set; } = 15;
 
+    /// <summary>
+    /// How long a pane may sit in BACKGND holding an unannounced completed turn before
+    /// the completed-turn notification fires anyway, without waiting for the background
+    /// shell to exit.
+    ///
+    /// Deferring the chime is the point of BACKGND - a turn that ends into a live shell
+    /// is not finished work yet - but the deferral cannot be unbounded, or a shell that
+    /// never exits (a dev server) would swallow the announcement entirely.
+    ///
+    /// Deliberately long: at the default 2s poll, 120s is 60 consecutive polls, so a
+    /// transient WORKING miss cannot reach it. A pane that sustains a misclassification
+    /// for two full minutes has a genuinely broken WORKING detector, which is a problem
+    /// this fallback neither causes nor conceals.
+    /// </summary>
+    public double BackgroundGraceSeconds { get; set; } = 120.0;
+
     /// <summary>Notification channel: "bell", "none" (extendable, e.g. "toast").</summary>
     public string NotificationChannel { get; set; } = "bell";
 
@@ -91,10 +107,24 @@ public sealed class WatchConfig
     /// shared with Copilot. WORKING keys on the current build's live spinner line -
     /// a line starting with an asterisk spinner glyph plus a live qualifier (an
     /// ellipsis, a "(32s · " activity meter, or the background-sub-agents wait) -
-    /// because the build no longer prints "esc to interrupt". IDLE keys on the
-    /// input-box mode line. These tokens are build-specific - run <c>--calibrate</c>
-    /// against a live Claude pane to confirm them after a Claude Code upgrade and
-    /// override here if they change.
+    /// because the build no longer prints "esc to interrupt".
+    ///
+    /// IDLE keys on the **composer box** (<see cref="AgentProfile.IdlePromptPattern"/>),
+    /// not on the status footer. It used to key on the footer's affordance hints, but
+    /// every segment of that footer is conditional: `? for shortcuts` renders only while
+    /// the composer is empty, and `(shift+tab to cycle)` is displaced whenever the footer
+    /// needs the space - notably by the background-task counter. A pane with a running
+    /// shell *and* typed text lost both hints at once and classified Unknown, which also
+    /// made it ineligible for DONE (derived from the WORKING to IDLE edge), so it never
+    /// chimed. The composer prompt is the input caret rather than a hint, is present in
+    /// every live state, and renders identically in vim insert and normal modes.
+    /// <see cref="AgentProfile.IdleHints"/> is therefore left empty here.
+    ///
+    /// BACKGND keys on that same displaced segment (`· 1 shell ·`, `· 2 monitors ·`),
+    /// matched only below the composer line so frozen transcript prose cannot trigger it.
+    ///
+    /// These tokens are build-specific - run <c>--calibrate</c> against a live Claude
+    /// pane to confirm them after a Claude Code upgrade and override here if they change.
     /// </summary>
     public static AgentProfile ClaudeProfile() => new()
     {
@@ -113,7 +143,16 @@ public sealed class WatchConfig
         WorkingLiveEllipsisPattern = @"…|\.\.\.",
         WorkingLiveMeterPattern = @"\(\d+[smh][^)]*·",
         WorkingBackgroundAgentsPattern = @"Waiting for \d+ background agent",
-        IdleHints = new() { "shift+tab to cycle", "? for shortcuts" },
+        // Composer prompt at line start, excluding the numbered selection cursor
+        // ("❯ 1.") which is the WAITING signal sharing the same glyph.
+        IdlePromptPattern = @"^\s*❯(?!\s*\d+\.)",
+        // A footer segment, not prose: the middot separator must precede the count, and
+        // the segment must end at another separator or the end of the line. That is what
+        // excludes "Ran 1 shell command" and "· 1 shell still running". Shells and
+        // monitors share the slot ("· 1 shell · 1 monitor ·") and mean the same thing to
+        // the watcher, so both count.
+        BackgroundTaskPattern = @"·\s*\d+\s+(shells?|monitors?)\s*(·|$)",
+        IdleHints = new(),                      // superseded by IdlePromptPattern
     };
 
     public static WatchConfig Load(string? path)

@@ -9,12 +9,25 @@ point here so there is a single source of truth.
 `tmux-watch` is a C# / Spectre.Console console app - read-only toward pane *content*,
 see "The tmux boundary" below - that watches
 coding-agent CLI sessions (GitHub Copilot CLI and Claude Code) running in **tmux**
-panes, classifies each pane (WAITING / WORKING / IDLE / DEAD) from its captured
+panes, classifies each pane (WAITING / WORKING / BACKGND / IDLE / DEAD) from its captured
 status bar, and surfaces the ones needing the user - with a jump-to-pane action.
 The monitor also derives a **DONE** state ("turn finished, your move") from the
 WORKING→IDLE transition; it is not a classifier signal (the classifier is stateless)
 but a per-pane state-machine promotion, acknowledged back to IDLE by a keystroke.
 Agents are pluggable `AgentProfile`s (`src/TmuxWatch/Config/`).
+
+**BACKGND** ("finished, but background work of its own is still running" - a shell or a
+monitor; Claude counts both in one footer slot) is the opposite: it *is* a classifier
+signal, because "not blocked, not working, background task alive" is fully visible on one
+screen and needs no history. It is quiet - no chime, no pointer cue - and it *defers*
+the finished-turn announcement rather than cancelling it. A pane that goes WORKING→BACKGND
+is marked as having an unannounced completed turn, released as DONE either when the shell
+exits (BACKGND→IDLE) or after a grace period (`backgroundGraceSeconds`, default 120) if
+the shell outlives it, so a `npm run dev` cannot swallow the chime forever. First sight
+never announces: a pane discovered already in BACKGND completed no turn the watcher saw,
+so neither exit fires - the same rule that keeps a freshly discovered IDLE pane out of
+DONE. Note the contrast with background *sub-agents*, which classify WORKING: there the
+agent is blocked on them, whereas a background shell means it has handed the turn back.
 
 The TUI also lists the panes that run *no* agent, in a separate "Other panes" table.
 These rows are inert inventory: never captured, classified, tracked, notified on, or
@@ -132,6 +145,30 @@ hardcoded constants. They are agent/version-specific - verify against real captu
 tokens are build-specific and have changed before (the current build's WORKING
 detection keys on the live spinner line, not the dropped `esc to interrupt` marker);
 re-run `--calibrate` and update the `claude` profile after a Claude Code upgrade.
+
+**Prefer structure over affordance hints.** Claude's status footer composes conditional
+segments, and it recycles their slots: `? for shortcuts` renders only while the composer
+is empty, and `(shift+tab to cycle)` is displaced whenever the footer needs room -
+including by the background-shell counter. Claude IDLE used to key on those two hints, and
+a pane that hit both conditions at once had no IDLE signal left, classified Unknown, and
+so became ineligible for DONE and never chimed. IDLE now anchors on the **composer box**
+(`IdlePromptPattern`: a `❯` at line start that is not the `❯ 1.` selection cursor), which
+is the input caret rather than a hint - present in every live state, identical in vim
+insert and normal modes, and not a slot the agent has reason to reuse. This is the same
+class of drift as the vanished `esc to interrupt`; when adding a token, ask whether it
+names structure or an affordance, and reach for structure.
+
+That anchor also splits the screen: **transcript above the composer, chrome below it.**
+`BackgroundTaskPattern` is matched only below, because the transcript keeps shell prose
+that either never meant a live task (`Ran 1 shell command`) or has outlived one
+(`· 1 shell still running`, frozen there after the shell exited). Matching those would pin
+a pane in BACKGND permanently - trading the Unknown bug for a stuck-state one.
+
+That pattern deliberately covers **both** kinds of background task Claude reports in the
+slot - `· 2 shells · 1 monitor ·` - not shells alone. A monitor-only pane displaces the
+`(shift+tab to cycle)` hint identically, and matching one kind but not the other would
+leave it looking plainly IDLE and chiming immediately instead of deferring. When Claude
+adds a third kind to that list, it belongs in this pattern too.
 
 ## Buffered stdout is load-bearing
 

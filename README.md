@@ -33,7 +33,8 @@ Each poll:
    | **WAITING** | numbered cursor `❯ 1.` **or** a footer with `↑/↓` + `esc to cancel` (covers command-approval *and* `ask_user`) |
    | **WORKING** | spinner glyph (`◎ ◉ ● ○`) + the word `Working`, **or** a spinner glyph + the action label + `esc cancel` footer (newer builds show the current action instead of `Working`) |
    | **DONE** | *derived, not a bottom-of-pane token:* the monitor promotes a pane to DONE on the WORKING→IDLE transition (a finished turn - "your move"); see below |
-   | **IDLE** | input box + `/ commands · ? help · space hold to record` |
+   | **BACKGND** | the agent's own background-task counter in the chrome below the composer (`· 1 shell ·`, `· 2 monitors ·`), with no selection prompt and no live spinner: the turn is over but the work it started is not; see below |
+   | **IDLE** | the composer box - a `❯` prompt that is not the `❯ 1.` selection cursor (Copilot: input box + `/ commands · ? help · space hold to record`) |
    | **DEAD** | foreground command is no longer `copilot`, or the pane is dead |
 
    **DONE ("your move").** A finished turn drops the agent to the same idle input box
@@ -44,6 +45,17 @@ Each poll:
    on) turns the pointer green. Acknowledge a DONE pane back to IDLE by switching to it
    (its number key) or pressing **`a`** on the focused row; acknowledgement is
    keystroke-driven, so a pane that already has focus never self-acknowledges.
+
+   **BACKGND ("finished, but its work isn't").** When a turn ends while a background task
+   the agent started is still running - a shell, or a monitor; Claude counts both in the
+   same footer slot - the work isn't really done, so the pane shows a quiet **`backgnd`**
+   instead of chiming, and the DONE announcement is *deferred*. It fires when the task
+   exits, or after `backgroundGraceSeconds` (default 120) if the task never does, so a
+   `npm run dev` can't swallow the chime forever. `backgnd` sorts below DONE and above
+   `working`, raises no notification and no pointer cue, and cannot be acknowledged -
+   there is nothing to acknowledge until it becomes DONE. A pane already in `backgnd` when
+   the watcher starts stays silent by either route: no completed turn was observed, so
+   there is nothing to announce.
 
 The foreground-command match is extension-insensitive, so a Windows/psmux host
 (`pane_current_command` reports `copilot.exe`) is detected the same as the bare
@@ -159,6 +171,7 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
   "pollIntervalSeconds": 2.0,
   "notificationChannel": "bell",
   "statusLineCount": 6,
+  "backgroundGraceSeconds": 120.0,
   "pointerSignal": {
     "enabled": true,
     "waitingCursorFile": "assets/waiting-cursor.cur",
@@ -187,11 +200,17 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
       "workingLiveEllipsisPattern": "…|\\.\\.\\.",
       "workingLiveMeterPattern": "\\(\\d+[smh][^)]*·",
       "workingBackgroundAgentsPattern": "Waiting for \\d+ background agent",
-      "idleHints": ["shift+tab to cycle", "? for shortcuts"]
+      "idlePromptPattern": "^\\s*❯(?!\\s*\\d+\\.)",
+      "backgroundTaskPattern": "·\\s*\\d+\\s+(shells?|monitors?)\\s*(·|$)",
+      "idleHints": []
     }
   ]
 }
 ```
+
+`idlePromptPattern` is the composer anchor: when set it supersedes `idleHints` for that
+profile, and it also splits the screen for `backgroundTaskPattern`, which is matched only
+*below* the composer line. Copilot leaves both empty and keeps using `idleHints`.
 
 Set `tmuxExecutable` to `psmux` (or another tmux-compatible CLI) to run against a
 different multiplexer host.
@@ -233,6 +252,13 @@ watched panes and does not affect the read-only guarantee.
 > `esc to interrupt` marker that the current build dropped). If a future build
 > changes the status bar again, run `--calibrate` against a live pane and override
 > the affected tokens in the `claude` profile above.
+>
+> This is also why IDLE anchors on the **composer box** rather than on a footer hint.
+> Claude's footer segments are conditional and share slots: `? for shortcuts` shows only
+> while the composer is empty, and `(shift+tab to cycle)` is displaced by the
+> background-shell counter. A pane hitting both at once had no IDLE signal left and
+> classified Unknown - which also made it ineligible for DONE, so it never chimed. The
+> composer prompt is structure rather than an affordance hint, so it survives that churn.
 
 ## Tests
 
@@ -243,8 +269,11 @@ dotnet test
 The classifier is pure and tested against **pane fixtures**
 (`tests/TmuxWatch.Tests/fixtures/`): Copilot command-approval WAITING, `ask_user`
 WAITING, WORKING, IDLE, a lazygit control (must not be flagged), and Claude Code
-WAITING/WORKING/IDLE. The Copilot fixtures are real captures (scrubbed of content);
-the Claude fixtures are synthetic shells built around the real status-bar tokens.
+WAITING/WORKING/IDLE/BACKGND. The Copilot fixtures are real captures (scrubbed of
+content); the Claude fixtures are synthetic shells built around the real status-bar
+tokens. The BACKGND fixture deliberately carries a frozen `· 1 shell still running`
+line in its transcript - the shell segment must be read from the chrome below the
+composer only, since that transcript line survives the shell itself.
 
 ## Topology note
 

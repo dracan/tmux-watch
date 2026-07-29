@@ -103,7 +103,9 @@ public sealed class WatcherApp
     /// an answer, else green (Done) if any finished its turn, else normal. Paused panes
     /// live in the secondary table and are deliberately excluded, so parking a pane
     /// clears its cue and resuming it re-arms it. WAITING outranks DONE. Non-agent panes
-    /// never reach this method, so they cannot influence the cue.
+    /// never reach this method, so they cannot influence the cue. BACKGND is a quiet
+    /// state and is likewise not a cue: a pane holding a background task has not asked
+    /// for the user yet, and will announce itself as DONE when it has.
     /// </summary>
     internal static PointerState AggregatePointerState(
         IReadOnlyList<TrackedPaneView> panes, IReadOnlySet<string> pausedIds)
@@ -821,15 +823,23 @@ public sealed class WatcherApp
             .ThenByDescending(p => p.EnteredAt)
             .ToList();
 
-    private static int Priority(PaneState state) => state switch
+    /// <summary>
+    /// Attention-first ordering, shared by the live tables and the one-shot output so the
+    /// two never disagree. Not the enum's declaration order, which is grouped for
+    /// readability and carries no urgency meaning.
+    /// </summary>
+    internal static int Priority(PaneState state) => state switch
     {
         PaneState.Waiting => 0,
         PaneState.Done => 1,
-        PaneState.Working => 2,
-        PaneState.Idle => 3,
-        PaneState.Unknown => 4,
-        PaneState.Dead => 5,
-        _ => 6,
+        // Not a "needs you" state and raises no notification, but a pane whose agent has
+        // finished its turn is closer to needing the user than one still mid-turn.
+        PaneState.Backgnd => 2,
+        PaneState.Working => 3,
+        PaneState.Idle => 4,
+        PaneState.Unknown => 5,
+        PaneState.Dead => 6,
+        _ => 7,
     };
 
     private IRenderable BuildView(WatchLayout layout, string? error, DateTimeOffset now)
@@ -971,10 +981,16 @@ public sealed class WatcherApp
         return table;
     }
 
-    private static string StateMarkup(PaneState state, bool attention) => state switch
+    /// <summary>
+    /// The state cell. Casing carries urgency: states that need the user are upper case,
+    /// quiet ones lower case - so BACKGND, which defers its announcement rather than
+    /// making one, renders lower case alongside working and idle.
+    /// </summary>
+    internal static string StateMarkup(PaneState state, bool attention) => state switch
     {
         PaneState.Waiting => "[yellow]● WAITING[/]",
         PaneState.Done => "[bold green]✓ DONE[/]",
+        PaneState.Backgnd => "[cyan]⋯ backgnd[/]",
         PaneState.Working => "[blue]◐ working[/]",
         PaneState.Idle => "[green]○ idle[/]",
         PaneState.Dead => "[red]✗ dead[/]",

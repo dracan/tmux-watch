@@ -6,9 +6,19 @@ namespace TmuxWatch.Detection;
 /// <summary>
 /// Pure classifier: turns a captured pane screen into a <see cref="PaneState"/>
 /// using one <see cref="AgentProfile"/>'s positive status-bar fingerprints. Applies
-/// a fixed precedence (WAITING → WORKING → IDLE → DEAD) so a screen matching more
-/// than one signal resolves predictably. Holds no mutable state, so it is trivially
+/// a fixed precedence (WAITING → WORKING → BACKGND → IDLE → DEAD) so a screen matching
+/// more than one signal resolves predictably. Holds no mutable state, so it is trivially
 /// fixture-testable. The caller selects the profile for a pane during discovery.
+///
+/// BACKGND sits below WORKING because the background-task counter stays in the chrome
+/// while the agent works, and above IDLE because a screen matching both is making the
+/// more specific claim.
+///
+/// Where the profile configures a composer prompt, that line also splits the scanned
+/// region in two: the agent's **transcript** above it and its **chrome** below. The
+/// distinction is load-bearing, not cosmetic - the transcript keeps frozen prose about
+/// shells that has outlived the shells themselves, so only the chrome may be searched
+/// for the background-task counter.
 /// </summary>
 public sealed class PaneClassifier
 {
@@ -21,6 +31,8 @@ public sealed class PaneClassifier
     private readonly Regex? _workingLiveEllipsis;
     private readonly Regex? _workingLiveMeter;
     private readonly Regex? _workingBackgroundAgents;
+    private readonly Regex? _idlePrompt;
+    private readonly Regex? _backgroundTask;
 
     // Default scan depth. The current Claude Code build renders the live spinner line
     // above the input box with a sub-agent panel below it, and tall selection menus
@@ -38,6 +50,8 @@ public sealed class PaneClassifier
         _workingLiveEllipsis = profile.CompileWorkingLiveEllipsis();
         _workingLiveMeter = profile.CompileWorkingLiveMeter();
         _workingBackgroundAgents = profile.CompileWorkingBackgroundAgents();
+        _idlePrompt = profile.CompileIdlePrompt();
+        _backgroundTask = profile.CompileBackgroundTask();
     }
 
     /// <summary>
@@ -56,7 +70,15 @@ public sealed class PaneClassifier
             return PaneState.Waiting;
         if (IsWorking(statusText))
             return PaneState.Working;
-        if (IsIdle(statusText))
+
+        // Index of the composer prompt within statusLines, or -1. Everything after it is
+        // chrome; everything before it is transcript. Resolved once and shared by the two
+        // checks below, both of which are anchored on it.
+        var composer = FindComposerLine(statusLines);
+
+        if (IsBackgnd(statusLines, composer))
+            return PaneState.Backgnd;
+        if (IsIdle(statusText, composer))
             return PaneState.Idle;
 
         return PaneState.Unknown;
@@ -124,8 +146,57 @@ public sealed class PaneClassifier
         return false;
     }
 
-    private bool IsIdle(string statusText) =>
-        _profile.IdleHints.Any(hint => statusText.Contains(hint, StringComparison.Ordinal));
+    /// <summary>
+    /// Index of the composer prompt in <paramref name="statusLines"/>, or -1 when the
+    /// profile configures no prompt pattern or none is on screen. The **last** match wins:
+    /// the composer is the bottom-most prompt, so anything resembling one further up is
+    /// transcript and must stay on the transcript side of the split.
+    /// </summary>
+    private int FindComposerLine(List<string> statusLines)
+    {
+        if (_idlePrompt is null)
+            return -1;
+
+        for (var i = statusLines.Count - 1; i >= 0; i--)
+        {
+            if (_idlePrompt.IsMatch(statusLines[i]))
+                return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The agent finished its turn but work it started - a background shell or monitor -
+    /// is still running. Matched only in the chrome below the composer: the transcript
+    /// above it holds shell prose that either never meant a live task ("Ran 1 shell
+    /// command") or has outlived one ("· 1 shell still running", frozen there after the
+    /// shell exited). Matching either would pin the pane in BACKGND for good.
+    /// </summary>
+    private bool IsBackgnd(List<string> statusLines, int composer)
+    {
+        if (composer < 0 || _backgroundTask is null)
+            return false;
+
+        for (var i = composer + 1; i < statusLines.Count; i++)
+        {
+            if (_backgroundTask.IsMatch(statusLines[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The composer anchor when the profile configures one, else the legacy status-hint
+    /// tokens. The anchor is preferred because footer hints are conditional slots the
+    /// agent recycles, while the composer is structure - see
+    /// <see cref="AgentProfile.IdlePromptPattern"/>.
+    /// </summary>
+    private bool IsIdle(string statusText, int composer) =>
+        _idlePrompt is not null
+            ? composer >= 0
+            : _profile.IdleHints.Any(hint => statusText.Contains(hint, StringComparison.Ordinal));
 
     private static List<string> TailNonBlank(string? capture, int count)
     {

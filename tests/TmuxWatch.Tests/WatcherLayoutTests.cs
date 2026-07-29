@@ -85,6 +85,90 @@ public class WatcherLayoutTests
     }
 
     [Fact]
+    public void Backgnd_sorts_below_done_and_above_working()
+    {
+        // BACKGND is not a "needs you" state, so it stays below WAITING and DONE - but a
+        // pane whose agent has finished its turn is nearer to needing the user than one
+        // still mid-turn, so it outranks WORKING.
+        var layout = Layout(
+            new[]
+            {
+                Agent("%idle", window: 0, state: PaneState.Idle),
+                Agent("%working", window: 1, state: PaneState.Working),
+                Agent("%backgnd", window: 2, state: PaneState.Backgnd),
+                Agent("%done", window: 3, state: PaneState.Done),
+                Agent("%waiting", window: 4, state: PaneState.Waiting),
+            },
+            Array.Empty<Pane>());
+
+        Assert.Equal(
+            new[] { "%waiting", "%done", "%backgnd", "%working", "%idle" },
+            layout.Agent.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void Priority_is_attention_order_not_enum_order()
+    {
+        // The one-shot output shares this function with the live tables. It used to sort
+        // by the enum's own value instead, which is grouped for readability and carries
+        // no urgency meaning - so DONE printed below IDLE, and inserting a state moved
+        // unrelated rows.
+        var byPriority = new[]
+            {
+                PaneState.Idle, PaneState.Dead, PaneState.Backgnd, PaneState.Unknown,
+                PaneState.Done, PaneState.Working, PaneState.Waiting,
+            }
+            .OrderBy(WatcherApp.Priority)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                PaneState.Waiting, PaneState.Done, PaneState.Backgnd,
+                PaneState.Working, PaneState.Idle, PaneState.Unknown, PaneState.Dead,
+            },
+            byPriority);
+    }
+
+    [Theory]
+    // Casing carries urgency in the state column: states that need the user shout, quiet
+    // ones do not. BACKGND defers its announcement rather than making one, so it belongs
+    // with the quiet group - the label must not imply the pane is asking for anything.
+    [InlineData(PaneState.Waiting, true)]
+    [InlineData(PaneState.Done, true)]
+    [InlineData(PaneState.Backgnd, false)]
+    [InlineData(PaneState.Working, false)]
+    [InlineData(PaneState.Idle, false)]
+    [InlineData(PaneState.Dead, false)]
+    public void State_label_casing_matches_urgency(PaneState state, bool shouts)
+    {
+        var word = Word(WatcherApp.StateMarkup(state, attention: false));
+        Assert.Equal(shouts, word == word.ToUpperInvariant());
+    }
+
+    [Fact]
+    public void Backgnd_label_is_distinct_and_does_not_widen_the_column()
+    {
+        var backgnd = WatcherApp.StateMarkup(PaneState.Backgnd, attention: false);
+
+        Assert.NotEqual(WatcherApp.StateMarkup(PaneState.Working, false), backgnd);
+        Assert.NotEqual(WatcherApp.StateMarkup(PaneState.Idle, false), backgnd);
+        Assert.Equal("backgnd", Word(backgnd));
+
+        // Same width as the widest existing label, so adding it reflows nothing.
+        var widest = new[] { PaneState.Waiting, PaneState.Done, PaneState.Working, PaneState.Idle, PaneState.Dead }
+            .Max(s => Visible(WatcherApp.StateMarkup(s, false)).Length);
+        Assert.True(Visible(backgnd).Length <= widest);
+    }
+
+    /// <summary>The markup with its Spectre colour tags stripped, as the user sees it.</summary>
+    private static string Visible(string markup) =>
+        System.Text.RegularExpressions.Regex.Replace(markup, @"\[[^\]]*\]", "");
+
+    /// <summary>The state word alone, without its colour tags or leading glyph.</summary>
+    private static string Word(string markup) => Visible(markup).Split(' ').Last();
+
+    [Fact]
     public void Both_toggles_default_to_showing_everything()
     {
         // A companion (same window as the agent) and an unrelated pane.
