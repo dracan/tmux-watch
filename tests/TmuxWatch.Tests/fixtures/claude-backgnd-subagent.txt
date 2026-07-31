@@ -1,0 +1,26 @@
+● Synthetic fixture - a Claude Code pane whose turn has finished while a *detached*
+  background sub-agent is still running (no real content).
+
+  Note what the footer does NOT say. It carries "(shift+tab to cycle)" and no counter
+  segment at all: background agents are never counted in that slot, so the shell/monitor
+  fingerprint has nothing to match here. The only evidence is the fleet panel below the
+  footer, and without it this screen is indistinguishable from a plain finished turn -
+  which is exactly why it used to classify IDLE and chime at the moment of delegation.
+
+  The line below is the trap, the sub-agent equivalent of "· 1 shell still running": it is
+  frozen into the transcript and survives the sub-agent by the rest of the session.
+
+  ⎿  Running in the background as @slow-sweep
+
+✻ Cogitated for 49s
+
+                                                          new task? /clear to save 12.3k tokens
+──────────────────────────────────────────────────────────────────── synthetic: fixture ──
+❯  what's it up to?
+─────────────────────────────────────────────────────────────────────────────────────────────
+    [Opus 5 (1M context)] synthetic | main
+    ctx  ░░░░░░░░░░  5% | $0.55 | 0m 30s
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+  ● main
+  ◯ slow-sweep  Sweep every source file under src/…                    2m 5s · ↓ 104.3k tokens

@@ -1,0 +1,17 @@
+● Synthetic fixture - a Claude Code pane one poll after launching a detached background
+  sub-agent (no real content).
+
+  The agent row has appeared but has produced nothing yet, so it carries a bare elapsed
+  time and no token counter. Anchoring the fingerprint on the row's trailing meter rather
+  than its bullet would miss this window on every agent ever launched - and the window is
+  the exact moment the WORKING -> IDLE edge would otherwise fire a premature chime.
+
+  ⎿  Running in the background as @slow-sweep
+
+──────────────────────────────────────────────────────────────────── synthetic: fixture ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+  ● main
+  ◯ slow-sweep  Sweep every source file under src/…                                       0s

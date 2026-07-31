@@ -16,18 +16,49 @@ WORKING→IDLE transition; it is not a classifier signal (the classifier is stat
 but a per-pane state-machine promotion, acknowledged back to IDLE by a keystroke.
 Agents are pluggable `AgentProfile`s (`src/TmuxWatch/Config/`).
 
-**BACKGND** ("finished, but background work of its own is still running" - a shell or a
-monitor; Claude counts both in one footer slot) is the opposite: it *is* a classifier
-signal, because "not blocked, not working, background task alive" is fully visible on one
-screen and needs no history. It is quiet - no chime, no pointer cue - and it *defers*
+**BACKGND** ("finished, but background work of its own is still running" - a shell, a
+monitor, or a detached sub-agent) is the opposite: it *is* a classifier signal, because
+"not blocked, not working, background task alive" is fully visible on one screen and needs
+no history. It is quiet - no chime, no pointer cue - and it *defers*
 the finished-turn announcement rather than cancelling it. A pane that goes WORKING→BACKGND
-is marked as having an unannounced completed turn, released as DONE either when the shell
+is marked as having an unannounced completed turn, released as DONE either when the task
 exits (BACKGND→IDLE) or after a grace period (`backgroundGraceSeconds`, default 120) if
-the shell outlives it, so a `npm run dev` cannot swallow the chime forever. First sight
+the task outlives it, so a `npm run dev` cannot swallow the chime forever. First sight
 never announces: a pane discovered already in BACKGND completed no turn the watcher saw,
 so neither exit fires - the same rule that keeps a freshly discovered IDLE pane out of
-DONE. Note the contrast with background *sub-agents*, which classify WORKING: there the
-agent is blocked on them, whereas a background shell means it has handed the turn back.
+DONE.
+
+Background **sub-agents** split across WORKING and BACKGND, and the line between them is
+whether the agent can still take input:
+
+- **Blocked** on them (`✻ Waiting for 2 background agents to finish` on the live status
+  line) → WORKING. The composer is unusable; the pane is busy.
+- **Detached** (the agent reports it is running in the background and hands the turn
+  straight back) → BACKGND. The composer is free, so this is the same shape as a
+  background shell: work outstanding, but the next move is nobody's until it reports.
+
+Detached agents get their own fingerprint because they are invisible to the footer
+counter: **agents are never counted in that slot.** A pane running one and nothing else
+renders the ordinary `(shift+tab to cycle)` hint there. What the counter *does* pick up is
+a sub-agent's own shells and monitors, aggregated into the parent pane's footer - which is
+why this presented as a flicker rather than a clean miss. The pane read BACKGND only while
+the sub-agent happened to be holding a shell, so the state was sampling the sub-agent's
+incidental resource use, not the sub-agent. The real signal is the fleet panel Claude
+renders below the footer: a `●` (U+25CF) `main` row that is always present, plus one `◯`
+(U+25EF) row per live agent, removed when that agent reports. That removal is what makes
+the fingerprint self-releasing - no timer, no history.
+
+The grace period is deliberately *not* per-kind. A sub-agent always terminates, so unlike a
+dev server it cannot swallow the chime forever; it can only outrun the 120s grace and chime
+somewhat early. Splitting the timer would mean BACKGND carrying a reason through the state
+machine, which is a real expansion for a cosmetic gain. Deferred, not foreclosed.
+
+One ceiling worth knowing: the fleet panel costs one line per agent, and the classifier
+scans the last 16 non-blank lines. A live capture put the composer 8 lines from the end
+with one agent running, so there is roughly eight agents' headroom before the composer
+falls out of the scan window and the pane classifies **Unknown**. Widening the scan is not
+the fix - it would expose WAITING to stale `❯ 1.` cursors in the transcript, and a visible
+Unknown is the better failure.
 
 The TUI also lists the panes that run *no* agent, in a separate "Other panes" table.
 These rows are inert inventory: never captured, classified, tracked, notified on, or
@@ -159,16 +190,32 @@ class of drift as the vanished `esc to interrupt`; when adding a token, ask whet
 names structure or an affordance, and reach for structure.
 
 That anchor also splits the screen: **transcript above the composer, chrome below it.**
-`BackgroundTaskPattern` is matched only below, because the transcript keeps shell prose
-that either never meant a live task (`Ran 1 shell command`) or has outlived one
-(`· 1 shell still running`, frozen there after the shell exited). Matching those would pin
-a pane in BACKGND permanently - trading the Unknown bug for a stuck-state one.
+Both BACKGND patterns are matched only below, because the transcript keeps prose that
+either never meant a live task (`Ran 1 shell command`) or has outlived one - `· 1 shell
+still running` frozen there after the shell exited, `Running in the background as @name`
+frozen there for the rest of the session after the sub-agent reported. Matching those
+would pin a pane in BACKGND permanently - trading the Unknown bug for a stuck-state one.
+The composer is found by the **last** `❯` on screen for the same reason: the user's own
+submitted prompts are echoed into the transcript with the identical glyph, and taking the
+first match would put the real chrome on the transcript side of the split.
 
-That pattern deliberately covers **both** kinds of background task Claude reports in the
-slot - `· 2 shells · 1 monitor ·` - not shells alone. A monitor-only pane displaces the
-`(shift+tab to cycle)` hint identically, and matching one kind but not the other would
-leave it looking plainly IDLE and chiming immediately instead of deferring. When Claude
-adds a third kind to that list, it belongs in this pattern too.
+`BackgroundTaskPattern` deliberately covers **both** kinds of background task Claude
+reports in the footer slot - `· 2 shells · 1 monitor ·` - not shells alone. A monitor-only
+pane displaces the `(shift+tab to cycle)` hint identically, and matching one kind but not
+the other would leave it looking plainly IDLE and chiming immediately instead of
+deferring. When Claude adds a third kind to that list, it belongs in this pattern too.
+
+`BackgroundAgentRowPattern` is the second BACKGND fingerprint and stays a **separate key**
+rather than an alternation inside the first. They are different objects on different UI
+surfaces - a middot-delimited footer segment versus a row in a panel - so one regex
+describing both would make the first pattern's careful "segment, not prose" framing untrue,
+and the two will drift on separate Claude release schedules. It matches the `◯` bullet
+rather than the row's trailing meter (`2m 5s · ↓ 104.3k tokens`): that meter is paren-less
+unlike `WorkingLiveMeterPattern` - which is exactly why such a pane fell through to IDLE
+instead of tripping WORKING - and a just-launched agent renders a bare `0s` with no
+separator at all, so a meter-shaped token would miss the opening seconds of every agent.
+Structure again, not decoration. Note that `← for agents` in the footer is **not** a
+signal: it renders whether or not any agent is running.
 
 ## Buffered stdout is load-bearing
 

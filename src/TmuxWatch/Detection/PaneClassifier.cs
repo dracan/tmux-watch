@@ -16,9 +16,10 @@ namespace TmuxWatch.Detection;
 ///
 /// Where the profile configures a composer prompt, that line also splits the scanned
 /// region in two: the agent's **transcript** above it and its **chrome** below. The
-/// distinction is load-bearing, not cosmetic - the transcript keeps frozen prose about
-/// shells that has outlived the shells themselves, so only the chrome may be searched
-/// for the background-task counter.
+/// distinction is load-bearing, not cosmetic - the transcript keeps frozen prose that has
+/// outlived the thing it describes ("· 1 shell still running" after the shell exited,
+/// "Running in the background as @name" after the sub-agent reported), so only the chrome
+/// may be searched for the BACKGND fingerprints.
 /// </summary>
 public sealed class PaneClassifier
 {
@@ -33,6 +34,7 @@ public sealed class PaneClassifier
     private readonly Regex? _workingBackgroundAgents;
     private readonly Regex? _idlePrompt;
     private readonly Regex? _backgroundTask;
+    private readonly Regex? _backgroundAgentRow;
 
     // Default scan depth. The current Claude Code build renders the live spinner line
     // above the input box with a sub-agent panel below it, and tall selection menus
@@ -52,6 +54,7 @@ public sealed class PaneClassifier
         _workingBackgroundAgents = profile.CompileWorkingBackgroundAgents();
         _idlePrompt = profile.CompileIdlePrompt();
         _backgroundTask = profile.CompileBackgroundTask();
+        _backgroundAgentRow = profile.CompileBackgroundAgentRow();
     }
 
     /// <summary>
@@ -167,20 +170,31 @@ public sealed class PaneClassifier
     }
 
     /// <summary>
-    /// The agent finished its turn but work it started - a background shell or monitor -
-    /// is still running. Matched only in the chrome below the composer: the transcript
-    /// above it holds shell prose that either never meant a live task ("Ran 1 shell
-    /// command") or has outlived one ("· 1 shell still running", frozen there after the
-    /// shell exited). Matching either would pin the pane in BACKGND for good.
+    /// The agent finished its turn but work it started - a background shell, a monitor, or
+    /// a detached sub-agent - is still running.
+    ///
+    /// Two tokens are searched, and either is sufficient. They are alternatives, not one
+    /// refining the other: the counter is a footer segment that never counts *agents*, so
+    /// a pane whose only outstanding work is a detached sub-agent shows nothing in that
+    /// slot and is visible only as a row in the agent panel. (The counter does pick up a
+    /// sub-agent's own shells and monitors, which made the gap flicker rather than fail
+    /// outright - it was sampling the sub-agent's incidental resource use.)
+    ///
+    /// Both are matched only in the chrome below the composer: the transcript above it
+    /// holds prose that either never meant a live task ("Ran 1 shell command") or has
+    /// outlived one ("· 1 shell still running" frozen after the shell exited, "Running in
+    /// the background as @name" frozen after the sub-agent reported). Matching any of them
+    /// would pin the pane in BACKGND for good.
     /// </summary>
     private bool IsBackgnd(List<string> statusLines, int composer)
     {
-        if (composer < 0 || _backgroundTask is null)
+        if (composer < 0 || (_backgroundTask is null && _backgroundAgentRow is null))
             return false;
 
         for (var i = composer + 1; i < statusLines.Count; i++)
         {
-            if (_backgroundTask.IsMatch(statusLines[i]))
+            if ((_backgroundTask?.IsMatch(statusLines[i]) ?? false) ||
+                (_backgroundAgentRow?.IsMatch(statusLines[i]) ?? false))
                 return true;
         }
 

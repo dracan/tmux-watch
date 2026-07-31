@@ -120,8 +120,17 @@ public sealed class WatchConfig
     /// every live state, and renders identically in vim insert and normal modes.
     /// <see cref="AgentProfile.IdleHints"/> is therefore left empty here.
     ///
-    /// BACKGND keys on that same displaced segment (`· 1 shell ·`, `· 2 monitors ·`),
-    /// matched only below the composer line so frozen transcript prose cannot trigger it.
+    /// BACKGND has two fingerprints, either sufficient, both matched only below the composer
+    /// line so frozen transcript prose cannot trigger them. The first is that same displaced
+    /// footer segment (`· 1 shell ·`, `· 2 monitors ·`). The second is a fleet-panel agent
+    /// row, for a sub-agent launched *detached* - Claude reports it as running in the
+    /// background and hands the turn straight back, so the pane is not blocked and is not
+    /// WORKING. The counter cannot cover that case: agents are never counted in that slot.
+    ///
+    /// The blocked form of the same feature - `Waiting for N background agents to finish` -
+    /// stays WORKING via <see cref="AgentProfile.WorkingBackgroundAgentsPattern"/>. The two
+    /// are told apart by the live status line alone, and the existing precedence (WORKING
+    /// above BACKGND) resolves a screen showing both.
     ///
     /// These tokens are build-specific - run <c>--calibrate</c> against a live Claude
     /// pane to confirm them after a Claude Code upgrade and override here if they change.
@@ -152,6 +161,18 @@ public sealed class WatchConfig
         // monitors share the slot ("· 1 shell · 1 monitor ·") and mean the same thing to
         // the watcher, so both count.
         BackgroundTaskPattern = @"·\s*\d+\s+(shells?|monitors?)\s*(·|$)",
+        // A fleet-panel row, one per live detached sub-agent. `◯` (U+25EF LARGE CIRCLE) is
+        // the per-agent bullet; `●` (U+25CF BLACK CIRCLE) is the `main` row, which renders
+        // whether or not any agent is running and must not match. Both glyphs were read
+        // from raw capture bytes, not inferred from a screenshot - they are easily confused.
+        //
+        // The row's trailing meter (`2m 5s · ↓ 104.3k tokens`) is deliberately NOT part of
+        // the token. It is paren-less, unlike WorkingLiveMeterPattern - which is precisely
+        // why such a pane classified IDLE rather than WORKING - and a just-launched agent
+        // renders a bare `0s` with no separator and no counter at all, so a meter-shaped
+        // token would miss the opening seconds of every agent. The bullet is structure; the
+        // meter is decoration.
+        BackgroundAgentRowPattern = @"^\s*◯",
         IdleHints = new(),                      // superseded by IdlePromptPattern
     };
 

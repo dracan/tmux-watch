@@ -1,0 +1,25 @@
+● Synthetic fixture - the same session as claude-backgnd-subagent.txt, after the detached
+  sub-agent reported back (no real content).
+
+  The fleet panel is gone entirely, which is what makes the row fingerprint self-releasing:
+  no timer and no history are needed to leave BACKGND, and the resulting BACKGND -> IDLE
+  edge releases the deferred completion at the right moment.
+
+  The delegation line and the agent's finished banner both remain frozen in the transcript.
+  If either were matched, the pane would sit in BACKGND for the rest of the session -
+  trading a premature chime for a permanently stuck row.
+
+  ⎿  Running in the background as @slow-sweep
+
+● Agent "Sweep every source file under src/…" finished · 10m 3s
+  Searched for 1 pattern, read 1 file, ran 2 shell commands
+
+✻ Cogitated for 49s
+
+                                                          new task? /clear to save 12.3k tokens
+──────────────────────────────────────────────────────────────────── synthetic: fixture ──
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────
+    [Opus 5 (1M context)] synthetic | main
+    ctx  ░░░░░░░░░░  5% | $6.40 | 16m 30s
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

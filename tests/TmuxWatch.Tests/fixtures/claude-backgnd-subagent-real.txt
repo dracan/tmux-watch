@@ -1,0 +1,20 @@
+● Scrubbed real capture - `tmux capture-pane -p` of a live Claude Code pane whose turn
+  has finished while a detached background sub-agent runs. Paths, costs and quotas are
+  scrubbed; every structural byte below is verbatim from the terminal.
+
+  It exists because AGENTS.md requires detection tokens be verified against real captures,
+  and the two glyphs this change turns on are exactly the kind a hand-written fixture gets
+  wrong: `●` (U+25CF) on the main row and `◯` (U+25EF) on the agent row are near identical
+  on screen. The footer is the other half of the evidence - it carries "(shift+tab to
+  cycle)" and no counter segment, confirming that a live background agent leaves the
+  shell/monitor slot completely untouched.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ what's it up to?
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    [Opus 5 (1M context)] synthetic | main                                                                     /rc
+    ctx  ░░░░░░░░░░ 5% | $0.00 | 0m 30s
+    5hr  ░░░░░░░░░░ 4%  |  7day ░░░░░░░░░░ 5% (5d 00h left)
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+  ● main
+  ◯ slow-sweep  Sweep every source file under src/...                  2m 5s · ↓ 104.3k tokens

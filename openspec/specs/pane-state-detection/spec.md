@@ -132,6 +132,13 @@ drops a large fraction of frames and flickers the pane to IDLE. A frozen end-of-
 spinner line that is past-tense (`<Word> for <duration>`, e.g. `Crunched for 54s`) with no
 ellipsis and no live meter MUST NOT be classified WORKING.
 
+The background-sub-agents WORKING qualifier covers only the form in which the agent is
+**blocked** on its sub-agents and cannot take input. A sub-agent launched **detached** -
+where the agent reports it as running in the background and returns the turn to the user -
+MUST NOT be classified WORKING; it is BACKGND, because the composer is free and the agent
+is not blocked. The two forms are distinguished by the live status line alone: the blocked
+form renders it, the detached form does not.
+
 IDLE is detected on the presence of the **composer box** - a prompt line beginning with
 `❯` that is not the numbered selection cursor - when neither WAITING, WORKING, nor BACKGND
 is present. IDLE MUST NOT be detected from status-footer affordance hints such as
@@ -143,8 +150,16 @@ composer prompt is the input caret rather than an affordance hint, is present in
 live state, and renders identically in both vim insert and normal modes, so it is not
 subject to the same slot recycling.
 
-BACKGND is detected on a background-task counter in the chrome below the composer line
-(see "Detect BACKGND").
+The composer line SHALL be located by its **last** match on the screen, because the user's
+own submitted prompts are echoed into the transcript with the same leading `❯` and would
+otherwise be mistaken for the composer, placing the real chrome on the transcript side of
+the split.
+
+BACKGND is detected in the chrome below the composer line on either a background-task
+counter or a background-agent row (see "Detect BACKGND"). Claude renders the latter as a
+fleet panel below the status footer, listing a `main` row plus one row per live detached
+sub-agent, each distinguished by its own row marker. The footer hint `← for agents` is
+present whether or not any sub-agent is running and MUST NOT be treated as a signal.
 
 The specific tokens are configurable and MUST be verified against real Claude Code
 captures before the defaults are relied upon.
@@ -174,6 +189,11 @@ captures before the defaults are relied upon.
 - **WHEN** a Claude pane's screen shows a spinner line `✻ Waiting for 2 background agents to finish` with a sub-agent panel rendered below the input box
 - **THEN** the pane is classified as WORKING
 
+#### Scenario: Claude with a detached background sub-agent is not WORKING
+
+- **WHEN** a Claude pane's fleet panel lists a live sub-agent row but the screen carries no live status line, so the composer is free
+- **THEN** the pane is NOT classified as WORKING, and is classified as BACKGND
+
 #### Scenario: Frozen completed line is not WORKING
 
 - **WHEN** a Claude pane is idle at the input box and an earlier `✻ Crunched for 54s` line (past-tense, no ellipsis, no meter) remains on screen
@@ -181,8 +201,13 @@ captures before the defaults are relied upon.
 
 #### Scenario: Claude at the input box is IDLE
 
-- **WHEN** a Claude pane shows its composer box with no selection prompt, no live spinner line, and no background-task counter
+- **WHEN** a Claude pane shows its composer box with no selection prompt, no live spinner line, no background-task counter, and no background-agent row
 - **THEN** the pane is classified as IDLE
+
+#### Scenario: Echoed prompt in the transcript does not displace the composer
+
+- **WHEN** a Claude pane's transcript contains an earlier submitted prompt echoed as `❯ Launch a background agent named @slow-sweep…` many lines above the real composer
+- **THEN** the composer is located at the lower line, and chrome below it is still searched for the BACKGND fingerprints
 
 #### Scenario: Displaced shift+tab hint no longer breaks IDLE
 
@@ -231,9 +256,14 @@ running. BACKGND is a **quiet** state: the agent has handed the turn back, but t
 started has not fully finished, so the pane SHALL NOT be treated as needing the user.
 
 BACKGND SHALL be produced by the stateless classifier from a single capture, not derived
-from pane history, because the condition is fully visible on one screen. The fingerprint
-is a background-task counter in the agent's status chrome, matched per agent profile as a
-configurable token.
+from pane history, because the condition is fully visible on one screen.
+
+Two independent fingerprints SHALL each be sufficient to produce BACKGND, both matched per
+agent profile as configurable tokens:
+
+1. A **background-task counter** in the agent's status chrome.
+2. A **background-agent row** in the agent's status chrome - a row the agent CLI renders
+   once per detached sub-agent that is still running.
 
 The counter SHALL cover every kind of background task the agent reports in that slot, not
 only shells. Claude Code renders shells and monitors into one footer segment (`· 2 shells ·
@@ -241,14 +271,27 @@ only shells. Claude Code renders shells and monitors into one footer segment (`�
 that has not finished. Recognising only one kind would leave a pane running the other
 looking plainly IDLE.
 
-The counter SHALL be matched **only in the region below the composer prompt line**, never
-in the transcript region above it. The transcript routinely contains prose that would
-otherwise match - a tool-use line such as `Ran 1 shell command`, and, critically, an
-end-of-turn line such as `✻ Cooked for 16s · 1 shell still running` which remains frozen
-on screen after the task has exited and would pin the pane in BACKGND indefinitely.
+The counter SHALL NOT be relied upon to detect a detached sub-agent. Agents are not
+counted in that slot: a pane running a detached sub-agent with no shell or monitor of its
+own renders the ordinary affordance hint there. Where a sub-agent's own shells or monitors
+are aggregated into the parent pane's counter, the counter tracks that incidental resource
+use rather than the sub-agent, and so MUST NOT be treated as coverage for it.
 
-A profile that configures no background-task token SHALL never produce BACKGND, leaving
-its classification behaviour unchanged.
+Both fingerprints SHALL be matched **only in the region below the composer prompt line**,
+never in the transcript region above it. The transcript routinely contains prose that would
+otherwise match - a tool-use line such as `Ran 1 shell command`, an end-of-turn line such
+as `✻ Cooked for 16s · 1 shell still running` which remains frozen on screen after the task
+has exited, and a delegation line such as `Running in the background as @name` which
+survives the sub-agent for the remainder of the session. Any of these would pin the pane in
+BACKGND indefinitely.
+
+The background-agent row SHALL be identified by its row marker rather than by any trailing
+activity meter. A newly launched agent's row carries no token counter, and its duration
+format varies, so a meter-shaped token would miss the opening seconds of every agent.
+
+A profile that configures neither token SHALL never produce BACKGND, and a profile that
+configures only one SHALL be classified from that one alone, leaving its behaviour
+otherwise unchanged.
 
 #### Scenario: Finished turn with a background shell is BACKGND
 
@@ -265,10 +308,35 @@ its classification behaviour unchanged.
 - **WHEN** the footer reads `· 2 shells · 1 monitor ·`
 - **THEN** the pane is classified as BACKGND
 
+#### Scenario: Finished turn with a detached background sub-agent is BACKGND
+
+- **WHEN** a Claude pane shows its composer box, a footer carrying no background-task counter (for example `-- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents`), and a fleet panel below that footer whose rows read `● main` followed by `◯ slow-sweep  Sweep every source file under … 2m 5s · ↓ 104.3k tokens`
+- **THEN** the pane is classified as BACKGND, not IDLE
+
+#### Scenario: Newly launched sub-agent with no activity meter is BACKGND
+
+- **WHEN** a background-agent row has only just appeared and carries a bare elapsed time (`0s`) with no token counter
+- **THEN** the pane is classified as BACKGND, because the row marker rather than the meter is the fingerprint
+
+#### Scenario: Several background sub-agents are still one BACKGND
+
+- **WHEN** the fleet panel lists more than one `◯` agent row
+- **THEN** the pane is classified as BACKGND, exactly as for a single row
+
+#### Scenario: The main fleet row alone is not BACKGND
+
+- **WHEN** the chrome below the composer carries a `● main` row and no `◯` agent row, and no background-task counter
+- **THEN** the pane is classified as IDLE, because the main row is present regardless of whether any agent is running
+
 #### Scenario: Background task while the agent works is still WORKING
 
 - **WHEN** a pane shows a live spinner line with an activity meter and its chrome also carries the background-task counter
 - **THEN** the pane is classified as WORKING, because WORKING outranks BACKGND
+
+#### Scenario: Blocked on sub-agents outranks the agent rows
+
+- **WHEN** a pane shows the live spinner line `✻ Waiting for 2 background agents to finish` and the fleet panel below the composer lists those agents as `◯` rows
+- **THEN** the pane is classified as WORKING, because WORKING outranks BACKGND and the agent cannot take input
 
 #### Scenario: Blocking prompt while a background task runs is still WAITING
 
@@ -278,6 +346,11 @@ its classification behaviour unchanged.
 #### Scenario: Frozen transcript shell text does not produce BACKGND
 
 - **WHEN** a pane is at its composer box with an earlier `✻ Cooked for 16s · 1 shell still running` line frozen in the transcript above the composer, and its chrome carries no counter
+- **THEN** the pane is classified as IDLE, not BACKGND
+
+#### Scenario: Frozen delegation prose does not produce BACKGND
+
+- **WHEN** a pane's transcript above the composer contains `Running in the background as @slow-sweep` from a sub-agent that has since finished, and the chrome below the composer carries no agent row and no counter
 - **THEN** the pane is classified as IDLE, not BACKGND
 
 #### Scenario: Tool-use shell prose does not produce BACKGND
@@ -295,7 +368,12 @@ its classification behaviour unchanged.
 - **WHEN** a BACKGND pane's background task exits and the chrome no longer carries the counter
 - **THEN** the pane is classified as IDLE on the next capture
 
+#### Scenario: Sub-agent completion returns the pane to IDLE
+
+- **WHEN** a detached sub-agent finishes and its row is removed from the fleet panel, leaving no agent rows and no background-task counter
+- **THEN** the pane is classified as IDLE on the next capture, releasing any deferred completion through the existing BACKGND to IDLE transition
+
 #### Scenario: Profile without a background-task token is unaffected
 
-- **WHEN** a Copilot pane is classified using a profile that configures no background-task token
+- **WHEN** a Copilot pane is classified using a profile that configures neither a background-task token nor a background-agent row token
 - **THEN** the pane is never classified BACKGND and resolves to its existing state

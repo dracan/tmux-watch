@@ -42,6 +42,19 @@ public class PaneClassifierTests
     [InlineData("claude-backgnd.txt", PaneState.Backgnd)]
     // The composer renders the same in vim normal mode, so the anchor is mode-independent.
     [InlineData("claude-idle-normal-mode.txt", PaneState.Idle)]
+    // Turn finished with a *detached* background sub-agent still running. The footer keeps
+    // "(shift+tab to cycle)" and carries no counter - agents never reach that slot - so the
+    // fleet panel row is the only evidence. This used to classify IDLE, which meant the
+    // WORKING -> IDLE edge chimed at the moment of delegation instead of at completion.
+    [InlineData("claude-backgnd-subagent.txt", PaneState.Backgnd)]
+    // The same screen as a scrubbed real capture, so the glyphs are verified against real
+    // terminal bytes rather than against a hand-written approximation of them.
+    [InlineData("claude-backgnd-subagent-real.txt", PaneState.Backgnd)]
+    // Same, one poll after launch: the row exists but has no token counter yet.
+    [InlineData("claude-backgnd-subagent-fresh.txt", PaneState.Backgnd)]
+    // The same session after the sub-agent reported: the panel is gone, but the delegation
+    // line and the finished banner remain frozen in the transcript.
+    [InlineData("claude-idle-after-subagent.txt", PaneState.Idle)]
     public void Classifies_claude_fixtures(string fixture, PaneState expected)
     {
         var state = ClaudeClassifier.Classify(Fixture(fixture), dead: false);
@@ -330,5 +343,80 @@ public class PaneClassifierTests
         var files = Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "fixtures"), "*.txt");
         foreach (var file in files)
             Assert.NotEqual(PaneState.Backgnd, Classifier.Classify(File.ReadAllText(file), dead: false));
+    }
+
+    // ---- BACKGND from a detached background sub-agent ----------------------
+
+    private const string MainRow = "  ● main";
+
+    private static string AgentRow(string name, string meter) =>
+        $"  ◯ {name}  Synthetic sweep…{meter,40}";
+
+    [Fact]
+    public void Main_fleet_row_alone_is_not_backgnd()
+    {
+        // The panel's `main` row renders whether or not any agent is running, so it carries
+        // no information. Only the per-agent bullet does. `●` and `◯` are near-identical on
+        // screen, which is precisely why this is pinned by a test.
+        var text = $"● Earlier output\n────\n❯\n────\n{PlainFooter}\n\n{MainRow}";
+        Assert.Equal(PaneState.Idle, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Several_agent_rows_are_still_one_backgnd()
+    {
+        // BACKGND is a claim about the pane, not a count of what it is waiting on.
+        var text = $"● Earlier output\n────\n❯\n────\n{PlainFooter}\n\n{MainRow}\n" +
+                   $"{AgentRow("sweep-one", "2m 5s · ↓ 104.3k tokens")}\n" +
+                   $"{AgentRow("sweep-two", "8s · ↓ 1.2k tokens")}";
+        Assert.Equal(PaneState.Backgnd, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Delegation_prose_above_the_composer_does_not_match()
+    {
+        // The sub-agent's counterpart to the frozen shell line. This survives the agent by
+        // the whole rest of the session, so matching it anywhere would pin the pane.
+        var text = "  ⎿  Running in the background as @slow-sweep\n" +
+                   $"────\n❯\n────\n{PlainFooter}";
+        Assert.Equal(PaneState.Idle, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Agent_completion_returns_the_pane_to_idle()
+    {
+        // The row leaves the panel when the agent finishes, so the fingerprint releases
+        // itself - no grace period and no history involved in getting back to IDLE.
+        var running = $"● Earlier output\n────\n❯\n────\n{PlainFooter}\n\n{MainRow}\n" +
+                      $"{AgentRow("slow-sweep", "2m 5s · ↓ 104.3k tokens")}";
+        var finished = $"● Earlier output\n────\n❯\n────\n{PlainFooter}";
+
+        Assert.Equal(PaneState.Backgnd, ClaudeClassifier.Classify(running, dead: false));
+        Assert.Equal(PaneState.Idle, ClaudeClassifier.Classify(finished, dead: false));
+    }
+
+    [Fact]
+    public void Blocked_on_subagents_outranks_the_agent_rows()
+    {
+        // Both forms of the same feature render the fleet panel; only the blocked form
+        // renders the live status line, and there the agent cannot take input. The existing
+        // WORKING-above-BACKGND precedence is what tells them apart - no new rule.
+        var text = "✻ Waiting for 2 background agents to finish\n" +
+                   $"────\n❯\n────\n{PlainFooter}\n\n{MainRow}\n" +
+                   $"{AgentRow("sweep-one", "2m 5s · ↓ 104.3k tokens")}";
+        Assert.Equal(PaneState.Working, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Agent_row_token_is_a_separate_key_from_the_counter()
+    {
+        // The two fingerprints must stay independently configurable: they describe
+        // different UI surfaces (a footer segment vs a panel row) that drift on different
+        // schedules. Copilot sets neither, which is what keeps BACKGND unreachable for it.
+        var claude = WatchConfig.ClaudeProfile();
+        Assert.NotEmpty(claude.BackgroundTaskPattern);
+        Assert.NotEmpty(claude.BackgroundAgentRowPattern);
+        Assert.NotEqual(claude.BackgroundTaskPattern, claude.BackgroundAgentRowPattern);
+        Assert.Empty(WatchConfig.CopilotProfile().BackgroundAgentRowPattern);
     }
 }

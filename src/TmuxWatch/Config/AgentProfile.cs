@@ -112,6 +112,29 @@ public sealed class AgentProfile
     /// </summary>
     public string BackgroundTaskPattern { get; set; } = "";
 
+    /// <summary>
+    /// Regex matching a background-*agent* row in the status chrome - the row the agent CLI
+    /// renders once per detached sub-agent that is still running, e.g. the `◯ slow-sweep …`
+    /// lines of Claude Code's fleet panel. Empty disables this fingerprint for the profile.
+    ///
+    /// This is a second, independent BACKGND fingerprint rather than an alternation inside
+    /// <see cref="BackgroundTaskPattern"/>, because agents never reach that counter's slot:
+    /// a pane running a detached sub-agent and nothing else renders the ordinary
+    /// `(shift+tab to cycle)` hint there. The counter *does* pick up a sub-agent's own
+    /// shells and monitors, which is why the gap presented as an intermittent flicker
+    /// rather than a constant miss - it was sampling the sub-agent's incidental resource
+    /// use, not the sub-agent.
+    ///
+    /// Keeping the two separate also keeps each honest: the counter is a middot-delimited
+    /// footer *segment*, this is a *row* in a panel. They are different UI surfaces and will
+    /// drift on different schedules, so they stay independently overridable.
+    ///
+    /// Searched over the same below-composer chrome as the counter, and for the same reason:
+    /// the transcript keeps a delegation line (`Running in the background as @name`) that
+    /// outlives the sub-agent by the rest of the session.
+    /// </summary>
+    public string BackgroundAgentRowPattern { get; set; } = "";
+
     /// <summary>Any one of these tokens in the status area indicates IDLE. Used only when
     /// <see cref="IdlePromptPattern"/> is empty.</summary>
     public List<string> IdleHints { get; set; } = new();
@@ -147,6 +170,9 @@ public sealed class AgentProfile
 
     /// <summary>Compiled background-task counter, or null when none is configured.</summary>
     public Regex? CompileBackgroundTask() => CompileOrNull(BackgroundTaskPattern);
+
+    /// <summary>Compiled background-agent row, or null when none is configured.</summary>
+    public Regex? CompileBackgroundAgentRow() => CompileOrNull(BackgroundAgentRowPattern);
 
     private static Regex? CompileOrNull(string pattern) =>
         string.IsNullOrEmpty(pattern) ? null : new Regex(pattern, RegexOptions.Compiled);
