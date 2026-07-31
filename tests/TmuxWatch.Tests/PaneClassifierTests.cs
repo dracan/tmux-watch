@@ -55,6 +55,9 @@ public class PaneClassifierTests
     // The same session after the sub-agent reported: the panel is gone, but the delegation
     // line and the finished banner remain frozen in the transcript.
     [InlineData("claude-idle-after-subagent.txt", PaneState.Idle)]
+    // A finished turn whose recap prose contains "❯ 1.". Read as a selection cursor it made
+    // the pane WAITING, which outranks IDLE - so the turn never reached DONE.
+    [InlineData("claude-idle-cursor-prose.txt", PaneState.Idle)]
     public void Classifies_claude_fixtures(string fixture, PaneState expected)
     {
         var state = ClaudeClassifier.Classify(Fixture(fixture), dead: false);
@@ -241,8 +244,55 @@ public class PaneClassifierTests
     [Fact]
     public void Waiting_outranks_background_shell()
     {
-        var text = $"╭──────────────────────╮\n│ ❯ 1. Yes             │\n╰──────────────────────╯\n────\n❯\n────\n{ShellFooter}";
+        // The prompt keeps its own footer here, because the cursor alone is no longer a
+        // signal this far up the screen - a box stacked *above* a live composer is not a
+        // layout any real prompt renders (see Cursor_above_the_composer_does_not_match),
+        // and if one ever does, this nav+cancel pair is what still catches it.
+        var text = $"╭──────────────────────╮\n│ ❯ 1. Yes             │\n│ ↑/↓ to navigate · enter to select · esc to cancel │\n╰──────────────────────╯\n────\n❯\n────\n{ShellFooter}";
         Assert.Equal(PaneState.Waiting, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Cursor_above_the_composer_does_not_match()
+    {
+        // The bug this rule exists for: an agent that *wrote* "❯ 1." - in a recap, a diff,
+        // a quoted screen - is not waiting on anyone. A live composer below the glyph is
+        // the proof, since every real prompt box replaces the composer rather than
+        // stacking above it. WAITING outranks IDLE, so this used to withhold DONE
+        // silently for as long as the text stayed on screen.
+        var text = $"● Widening the scan would expose WAITING to stale ❯ 1. cursors\n────\n❯\n────\n{PlainFooter}";
+        Assert.Equal(PaneState.Idle, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Cursor_with_no_composer_on_screen_still_waits()
+    {
+        // The other half of the same rule: a prompt box takes the composer's place, so
+        // there is no split to apply and the cursor is read wherever it lands. This is
+        // the shape of all four WAITING fixtures, and of a bare permission prompt, which
+        // carries no nav/cancel footer to fall back on.
+        var text = "● Earlier output\n╭──────────────────────╮\n│ Do you want to proceed? │\n│ ❯ 1. Yes             │\n│   2. No              │\n╰──────────────────────╯";
+        Assert.Equal(PaneState.Waiting, ClaudeClassifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Profile_without_a_composer_pattern_matches_the_cursor_anywhere()
+    {
+        // Copilot configures no composer prompt, so there is no split to apply and the
+        // position rule is inert - the same screen that reads IDLE under Claude's profile
+        // stays WAITING under one that cannot locate a composer.
+        var text = $"● Widening the scan would expose WAITING to stale ❯ 1. cursors\n────\n❯\n────\n{PlainFooter}";
+        Assert.Equal(PaneState.Idle, ClaudeClassifier.Classify(text, dead: false));
+        Assert.Equal(PaneState.Waiting, Classifier.Classify(text, dead: false));
+    }
+
+    [Fact]
+    public void Cursor_typed_into_the_composer_does_not_match()
+    {
+        // Falls out of the same position rule: the composer line is chrome, but it is not
+        // *below* itself, so text the user is still typing cannot flag their own pane.
+        var text = $"● Earlier output\n────\n❯ why did ❯ 1. flag that pane\n────\n{PlainFooter}";
+        Assert.Equal(PaneState.Idle, ClaudeClassifier.Classify(text, dead: false));
     }
 
     [Fact]

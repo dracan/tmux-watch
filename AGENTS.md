@@ -57,8 +57,11 @@ One ceiling worth knowing: the fleet panel costs one line per agent, and the cla
 scans the last 16 non-blank lines. A live capture put the composer 8 lines from the end
 with one agent running, so there is roughly eight agents' headroom before the composer
 falls out of the scan window and the pane classifies **Unknown**. Widening the scan is not
-the fix - it would expose WAITING to stale `❯ 1.` cursors in the transcript, and a visible
-Unknown is the better failure.
+the fix, and a visible Unknown is the better failure. WAITING no longer reads transcript
+cursors when a composer is on screen (see "Prefer structure over affordance hints"), but
+this is exactly the case where one is *not*: with the composer off the top of the window
+there is no split to apply, cursors are read wherever they land, and a stale `❯ 1.` in the
+transcript would show a busy pane as blocking on you. Widening only makes that likelier.
 
 The TUI also lists the panes that run *no* agent, in a separate "Other panes" table.
 These rows are inert inventory: never captured, classified, tracked, notified on, or
@@ -198,6 +201,24 @@ would pin a pane in BACKGND permanently - trading the Unknown bug for a stuck-st
 The composer is found by the **last** `❯` on screen for the same reason: the user's own
 submitted prompts are echoed into the transcript with the identical glyph, and taking the
 first match would put the real chrome on the transcript side of the split.
+
+The **WAITING cursor** (`WaitingCursorPattern`) is matched below the split too, and the
+reason is the mirror image: not prose that outlived a live task, but prose that was never
+one. An agent that *writes* `❯ 1.` - in a recap, a diff, a quoted screen, this very
+paragraph - is not waiting on anybody, and because WAITING outranks IDLE the pane was
+pinned there for as long as the text stayed on screen: no DONE, no chime, and a row that
+looked like it was blocking on you. The position rule costs a genuine prompt nothing,
+because the prompt box **replaces** the composer rather than stacking above it (true of
+all four WAITING fixtures) - so a real prompt finds no composer, no split to apply, and
+the cursor is read wherever it lands. The two halves are one rule: below the composer, or
+anywhere when there is none.
+
+The footer half of WAITING (`↑/↓` + `esc to cancel` on one line) is deliberately **left**
+whole-screen, and the asymmetry is the safety net. Splitting it too would gain little -
+that pair is far less likely than a `❯ 1.` to show up in prose - and would forfeit the
+one check still standing if some prompt does render a composer above its menu. The only
+form carrying no such footer is the bare permission box, which is the form most clearly
+confirmed to replace the composer.
 
 `BackgroundTaskPattern` deliberately covers **both** kinds of background task Claude
 reports in the footer slot - `· 2 shells · 1 monitor ·` - not shells alone. A monitor-only

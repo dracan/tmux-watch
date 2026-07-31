@@ -16,10 +16,11 @@ namespace TmuxWatch.Detection;
 ///
 /// Where the profile configures a composer prompt, that line also splits the scanned
 /// region in two: the agent's **transcript** above it and its **chrome** below. The
-/// distinction is load-bearing, not cosmetic - the transcript keeps frozen prose that has
-/// outlived the thing it describes ("· 1 shell still running" after the shell exited,
-/// "Running in the background as @name" after the sub-agent reported), so only the chrome
-/// may be searched for the BACKGND fingerprints.
+/// distinction is load-bearing, not cosmetic - the transcript keeps prose that never was
+/// a live signal, or has outlived the thing it describes ("· 1 shell still running" after
+/// the shell exited, "Running in the background as @name" after the sub-agent reported, a
+/// "❯ 1." written out in a sentence), so only the chrome may be searched for the BACKGND
+/// fingerprints and the WAITING cursor.
 /// </summary>
 public sealed class PaneClassifier
 {
@@ -69,16 +70,15 @@ public sealed class PaneClassifier
         var statusLines = TailNonBlank(capture, _statusLineCount);
         var statusText = string.Join("\n", statusLines);
 
-        if (IsWaiting(statusText))
+        // Index of the composer prompt within statusLines, or -1. Everything after it is
+        // chrome; everything before it is transcript. Resolved once and shared by the
+        // checks below, all of which are anchored on it.
+        var composer = FindComposerLine(statusLines);
+
+        if (IsWaiting(statusLines, statusText, composer))
             return PaneState.Waiting;
         if (IsWorking(statusText))
             return PaneState.Working;
-
-        // Index of the composer prompt within statusLines, or -1. Everything after it is
-        // chrome; everything before it is transcript. Resolved once and shared by the two
-        // checks below, both of which are anchored on it.
-        var composer = FindComposerLine(statusLines);
-
         if (IsBackgnd(statusLines, composer))
             return PaneState.Backgnd;
         if (IsIdle(statusText, composer))
@@ -87,10 +87,31 @@ public sealed class PaneClassifier
         return PaneState.Unknown;
     }
 
-    private bool IsWaiting(string statusText)
+    /// <summary>
+    /// The agent is blocked on the user: a selection cursor, or a footer offering to
+    /// navigate and cancel.
+    ///
+    /// The cursor is searched in the chrome only - below the composer, or anywhere on
+    /// screen when no composer is present. That second case is what every real prompt
+    /// looks like: the box *replaces* the input box rather than stacking above it (all
+    /// four WAITING fixtures), so the position rule costs a genuine prompt nothing. What
+    /// it excludes is the transcript, where a "❯ 1." is prose - a recap, a diff, a
+    /// quoted screen, this very paragraph - and an agent that has merely *written* the
+    /// glyph is not waiting on anyone. Matching it pinned the pane in WAITING, which
+    /// outranks IDLE and so withheld DONE for as long as the text stayed on screen.
+    ///
+    /// The footer check below stays whole-screen deliberately, as the asymmetry is the
+    /// safety net: if some prompt does render a composer above its menu, the nav+cancel
+    /// pair still catches it. Only the bare permission box lacks that footer, and that is
+    /// the one form confirmed to replace the composer.
+    /// </summary>
+    private bool IsWaiting(List<string> statusLines, string statusText, int composer)
     {
-        if (_waitingCursor.IsMatch(statusText))
-            return true;
+        for (var i = composer + 1; i < statusLines.Count; i++)
+        {
+            if (_waitingCursor.IsMatch(statusLines[i]))
+                return true;
+        }
 
         // Footer wording varies between approval and ask_user prompts; only the
         // nav marker + cancel marker are invariant. Require both on one line so we

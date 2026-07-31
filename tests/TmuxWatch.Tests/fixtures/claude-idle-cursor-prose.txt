@@ -1,0 +1,21 @@
+● Scrubbed capture - a finished Claude turn whose own recap text contains the string
+  "❯ 1.". The pane is IDLE: the glyph is prose in the transcript, several lines above a
+  live composer. Read as a selection cursor it made the pane WAITING, which outranks
+  IDLE, so the finished turn never reached DONE and never chimed.
+
+  Two things I left undone deliberately, both recorded in AGENTS.md:
+
+  - The panel has a ceiling. It costs one line per agent against a 16-line scan window,
+  before the composer falls out and the pane classifies Unknown. Widening the scan would
+  expose WAITING to stale ❯ 1. cursors in the transcript, so a visible Unknown is the
+  better failure.
+
+✻ Cogitated for 10m 33s
+
+※ recap: Fixed the synthetic bug described above. Nothing pending.
+
+─────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────
+    [Synthetic Model] example-repo | main
+  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
