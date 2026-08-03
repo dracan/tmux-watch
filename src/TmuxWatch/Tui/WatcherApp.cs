@@ -949,10 +949,20 @@ public sealed class WatcherApp
             // The focus marker shares the number column rather than taking a
             // dedicated one, keeping the table narrow for thin splits. The highlight
             // bar sits outside it so the two markers stay visually distinct.
+            //
+            // Focus is the louder of the two, deliberately. It reports tmux's own state,
+            // which moves on the next poll when the user switches panes with tmux's keys -
+            // no keystroke this app ever sees. The highlight only reports where this app's
+            // cursor sits. Both jump paths (enter and the address keys) end by dragging the
+            // cursor onto the row they activate, so the two agree after every in-app switch
+            // and diverge only on an outside one; giving the cursor the heavier styling
+            // taught the reader to trust it as the current-pane marker, which it is not.
+            // Grey matches the table border on purpose: the cursor need only be findable
+            // while the user is deliberately arrowing, and the two never share a cell.
             if (focused)
-                addressCell = $"[green]►[/]{addressCell}";
+                addressCell = $"[yellow]►[/]{addressCell}";
             if (string.Equals(pane.Id, highlightedId, StringComparison.Ordinal))
-                addressCell = $"[yellow]▌[/]{addressCell}";
+                addressCell = $"[grey]▌[/]{addressCell}";
 
             var cells = new List<string>
             {

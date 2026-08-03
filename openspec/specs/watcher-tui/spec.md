@@ -259,6 +259,20 @@ apply to the highlighted row regardless of where the marker sits. The marker MAY
 to determine the **session** a new window is created in, which acts on a session rather
 than on the marked pane itself.
 
+The highlight marker and the focus marker SHALL be rendered so that they are not
+mistaken for one another, and the **focus marker SHALL carry the greater visual weight
+of the two**. The focus marker reports a fact about the multiplexer that can change
+without any keystroke the watcher sees - a pane switched with the multiplexer's own keys
+moves it on the next poll - whereas the highlight marker reports only where the
+watcher's own cursor sits. Giving the louder styling to the highlight invites the reader
+to treat it as the authoritative statement about the current pane, which it is not. The
+highlight marker SHALL nonetheless remain legible, since it names the target of the row
+actions.
+
+Where the same focus marker is rendered outside the live view - in one-shot and
+calibration output - it SHALL use the same styling as the live view, so a single marker
+does not mean different things in different output modes.
+
 #### Scenario: Arrow keys move the highlight across tables
 
 - **WHEN** the highlight is on the last row of the agent table and the user presses the down arrow
@@ -288,6 +302,16 @@ than on the marked pane itself.
 
 - **WHEN** the multiplexer's current pane differs from the highlighted row and the user creates a new window
 - **THEN** the window is created in the marked pane's session, and the marked pane itself is otherwise untouched
+
+#### Scenario: Focus marker outweighs the highlight marker
+
+- **WHEN** a row carries both the highlight marker and the focus marker
+- **THEN** the focus marker is the more prominent of the two, and the highlight marker is the quieter
+
+#### Scenario: One-shot output matches the live view
+
+- **WHEN** the user runs the one-shot or calibration output and a pane carries the focus marker
+- **THEN** that marker is styled as it is in the live view
 
 ### Requirement: Address any visible row by key
 
