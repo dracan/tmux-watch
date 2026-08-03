@@ -959,8 +959,12 @@ public sealed class WatcherApp
             // taught the reader to trust it as the current-pane marker, which it is not.
             // Grey matches the table border on purpose: the cursor need only be findable
             // while the user is deliberately arrowing, and the two never share a cell.
+            //
+            // The focus marker is spaced off the address key; the highlight bar is not.
+            // The arrow needs the gap because it reads as pointing *at* the key when
+            // flush against it, and the solid bar does not.
             if (focused)
-                addressCell = $"[yellow]►[/]{addressCell}";
+                addressCell = $"[yellow]►[/] {addressCell}";
             if (string.Equals(pane.Id, highlightedId, StringComparison.Ordinal))
                 addressCell = $"[grey]▌[/]{addressCell}";
 
