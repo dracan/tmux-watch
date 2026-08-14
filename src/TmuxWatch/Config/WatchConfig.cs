@@ -62,6 +62,25 @@ public sealed class WatchConfig
     /// </summary>
     public double BackgroundGraceSeconds { get; set; } = 120.0;
 
+    /// <summary>
+    /// How long an acknowledged pane keeps the position it had before the
+    /// acknowledgement, so the row the user just addressed does not leap down the table
+    /// in response to their own keystroke.
+    ///
+    /// Acknowledging demotes a pane from DONE to IDLE - four priority ranks - and the
+    /// view is rebuilt in the same frame, before tmux has reported anything new. Without
+    /// a settle time the movement reads as the UI reacting to the keypress, and because
+    /// address keys are positional and reassigned every frame, the next key of a triage
+    /// burst is aimed at a layout that no longer exists.
+    ///
+    /// Held panes are released only by a poll at or after the deadline, never by a
+    /// keystroke-driven rebuild, so the eventual movement does not coincide with a
+    /// keypress either. Deliberately short: this is a settle time, not a freeze, and the
+    /// row's state, colour, and cue update immediately regardless. Set to 0 to disable
+    /// the hold and demote at once.
+    /// </summary>
+    public double AckHoldSeconds { get; set; } = 5.0;
+
     /// <summary>Notification channel: "bell", "none" (extendable, e.g. "toast").</summary>
     public string NotificationChannel { get; set; } = "bell";
 

@@ -118,6 +118,13 @@ directly.
 focused. The `►` marker is never the target of a row action; `n` is the only key that
 reads it, and only for the session it names.
 
+Acknowledging a pane - by jumping to it or with `a` - would normally drop it four ranks
+down the table, in the same frame as your keystroke and before tmux has reported anything.
+So the row **keeps its position for `ackHoldSeconds`** (default 5) instead, and moves only
+on a later poll. Its state, colour, and cue update immediately; only the position waits.
+That keeps the address keys you just read off the screen pointing at the same panes for
+the next few seconds. Set `ackHoldSeconds` to `0` to demote at once.
+
 Pressing `n` opens a name prompt under the tables - the tables stay up and keep
 refreshing while you type. It supports cursor editing (left/right, home/end, backspace,
 delete) plus `ctrl+w` to delete the previous word and `ctrl+u` to clear the line. Enter
@@ -172,6 +179,7 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
   "notificationChannel": "bell",
   "statusLineCount": 6,
   "backgroundGraceSeconds": 120.0,
+  "ackHoldSeconds": 5.0,
   "pointerSignal": {
     "enabled": true,
     "waitingCursorFile": "assets/waiting-cursor.cur",

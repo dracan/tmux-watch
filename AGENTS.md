@@ -107,6 +107,38 @@ once; `n` breaks the tie toward the highlighted row's session. The `o`, `c`, and
 toggles are runtime-only and reset to their defaults on each launch - they have no config
 key.
 
+### An acknowledged row does not move
+
+Acknowledging a pane - by jumping to it or with `a` - demotes it from DONE to IDLE, four
+priority ranks, and resets its in-state timer. Doing that inline would re-sort the table in
+the same frame as the keystroke, before tmux has reported anything: the row the user just
+aimed at drops away under their eyes, and since **address keys are positional and
+reassigned every frame**, the second key of a `2`-deal-`3` triage burst is aimed at a
+layout that no longer exists and can land on a pane mid-turn.
+
+So an ack instead records an `AckHold` pinning that pane's **whole sort key** for
+`ackHoldSeconds` (default 5; `0` restores the instant demotion). Pinning the rank alone
+would not do - `Acknowledge` resets `EnteredAt` and ties break on it descending, so the row
+would still jump to the top of its own rank. Only *position* is held: the state badge,
+its colour, the pointer cue, and notifications all update immediately, so `a` still
+confirms itself instantly.
+
+Two structural details carry the rest of the behaviour:
+
+- **`OrderAll` applies holds; only `ExpireHolds` releases them, and only the poll loop
+  calls it.** `Rebuild` runs on keystrokes as well as polls, so putting the deadline check
+  there would let a keypress release a hold - moving the row on a keystroke after all,
+  just a later one. Keeping expiry in `Run` makes "released only by a poll" true by
+  construction rather than by discipline.
+- **The hold is absolute for its duration**, in both directions: neither a demotion to
+  WORKING nor a promotion to WAITING releases it early. A promotion costs one slot at
+  most (WAITING sits directly above DONE) and the chime and pointer cue are state-driven,
+  so the urgent signal is never delayed - only its position is.
+
+`p` is the single exception, releasing the hold at its key handler: pausing *is* a request
+to move that row, so honouring the hold there would defeat the key rather than steady the
+view.
+
 While the `n` prompt is open it is **modal**: every keystroke goes to the line editor
 (`src/TmuxWatch/Tui/LineEditor.cs`), so no command or address key fires and `q` is just a
 character. The editor is a pure `(text, cursor)` state machine so its whole key table is

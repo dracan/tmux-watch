@@ -38,6 +38,16 @@ internal sealed record WatchLayout(
 }
 
 /// <summary>
+/// A pane's sort position, frozen at the moment it was acknowledged and honoured until
+/// <see cref="ReleaseAt"/>. Both halves of the sort key are captured, not just the rank:
+/// acknowledging resets a pane's <c>EnteredAt</c>, and since ties break on that
+/// descending, pinning the rank alone would still let the row jump to the top of its own
+/// rank instead of down the table - the same defect at a smaller amplitude.
+/// </summary>
+internal readonly record struct AckHold(
+    int Priority, DateTimeOffset EnteredAt, DateTimeOffset ReleaseAt);
+
+/// <summary>
 /// Live Spectre.Console view of watched agent panes, plus an optional table of the
 /// non-agent panes. WAITING panes are sorted to the top of the agent table. A highlighted
 /// row is moved with the arrow keys and is the target of the pause and acknowledge
@@ -56,6 +66,13 @@ public sealed class WatcherApp
     // agent and non-agent pane ids; for a non-agent pane it is purely decluttering,
     // since such a pane contributes no cue to mute.
     private readonly HashSet<string> _paused = new();
+
+    // Panes whose sort position is frozen because they were just acknowledged. Kept here
+    // for the same reason as _paused: where a row is drawn is a view concern, and the
+    // monitor stays the sole authority on what a pane *is*. Acknowledge is therefore
+    // untouched, so notifications, the pointer cue, and the state machine keep their
+    // semantics for free.
+    private readonly Dictionary<string, AckHold> _ackHolds = new();
 
     // When false (the default) the wide-only columns (Path, Loc) are hidden so
     // the table fits a thin terminal split. Toggled at runtime with the w key.
@@ -163,6 +180,14 @@ public sealed class WatcherApp
                         frame.AgentViews = snapshot.Panes.ToList();
                         frame.OtherPanes = snapshot.OtherPanes.ToList();
 
+                        // The only place a hold is released. Doing it here rather than in
+                        // Rebuild is what ties the release to a poll: a row that has to
+                        // move does so alongside news from tmux, never on a keystroke.
+                        ExpireHolds(
+                            _ackHolds,
+                            frame.AgentViews.Select(v => v.Pane.Id),
+                            DateTimeOffset.UtcNow);
+
                         Rebuild(frame);
                         Render(frame, ctx);
                         DrivePointer(frame.AgentViews);
@@ -229,11 +254,17 @@ public sealed class WatcherApp
     /// <summary>
     /// Recompute the frame's rows and re-resolve the highlight against them. Called after
     /// every poll and after any key that changes what is visible.
+    /// <para>
+    /// Deliberately applies the acknowledgement holds without ever expiring one: a key
+    /// that rebuilds the view must not be able to release a hold, or the row would move
+    /// on a keystroke after all - just a later one. Expiry belongs to the poll loop.
+    /// </para>
     /// </summary>
     private void Rebuild(FrameState frame)
     {
         frame.Layout = BuildLayout(
-            frame.AgentViews, frame.OtherPanes, _paused, _showOtherPanes, _showCompanionPanes);
+            frame.AgentViews, frame.OtherPanes, _paused, _showOtherPanes, _showCompanionPanes,
+            _ackHolds);
 
         var index = ResolveHighlightIndex(frame.Layout.All, _highlightedId, _highlightIndex);
         _highlightIndex = index < 0 ? 0 : index;
@@ -259,9 +290,10 @@ public sealed class WatcherApp
         IReadOnlyList<Pane> otherPanes,
         IReadOnlySet<string> pausedIds,
         bool showOtherPanes,
-        bool showCompanionPanes)
+        bool showCompanionPanes,
+        IReadOnlyDictionary<string, AckHold>? ackHolds = null)
     {
-        var orderedAgents = OrderAll(agentViews, pausedIds)
+        var orderedAgents = OrderAll(agentViews, pausedIds, ackHolds)
             .Select(v => new WatchRow(v.Pane, v))
             .ToList();
 
@@ -487,7 +519,9 @@ public sealed class WatcherApp
                             // re-evaluate the pointer cue so pausing a waiting pane
                             // clears it (and resuming re-arms it) without waiting a tick.
                             // A non-agent row has no cue, so this is purely decluttering.
-                            if (TogglePause(_paused, HighlightedRow(frame)?.Id))
+                            // Passing the holds is what lets a paused row move at once:
+                            // TogglePause releases its hold. See TogglePause.
+                            if (TogglePause(_paused, HighlightedRow(frame)?.Id, _ackHolds))
                             {
                                 Rebuild(frame);
                                 Render(frame, ctx);
@@ -525,6 +559,11 @@ public sealed class WatcherApp
                             var row = HighlightedRow(frame);
                             if (row is { IsAgent: true } && _monitor.Acknowledge(row.Id))
                             {
+                                // Same hold as a jump: the badge flips to IDLE at once,
+                                // but the row does not slide out from under the cursor.
+                                RecordAckHold(
+                                    _ackHolds, row.Agent!, _cfg.AckHoldSeconds,
+                                    DateTimeOffset.UtcNow);
                                 ApplyOptimisticAck(frame.AgentViews, row.Id);
                                 Rebuild(frame);
                                 Render(frame, ctx);
@@ -707,7 +746,12 @@ public sealed class WatcherApp
         SwitchTo(row.Pane);
 
         if (row.IsAgent && _monitor.Acknowledge(row.Id))
+        {
+            // Freeze the position first, reading the row as it was before the ack, so the
+            // pane you just addressed does not fall four ranks under your own keystroke.
+            RecordAckHold(_ackHolds, row.Agent!, _cfg.AckHoldSeconds, DateTimeOffset.UtcNow);
             ApplyOptimisticAck(frame.AgentViews, row.Id);
+        }
 
         // Optimistically move the focus marker so it updates instantly instead of
         // waiting for the next poll. Both row kinds share the marker, so both lists
@@ -726,13 +770,20 @@ public sealed class WatcherApp
     /// Toggles the paused flag of <paramref name="id"/>. Returns true when a row was
     /// given (so the caller can re-render), false when there is nothing highlighted.
     /// </summary>
-    internal static bool TogglePause(ISet<string> paused, string? id)
+    internal static bool TogglePause(
+        ISet<string> paused, string? id, IDictionary<string, AckHold>? ackHolds = null)
     {
         if (id is null)
             return false;
 
         if (!paused.Remove(id))
             paused.Add(id);
+
+        // The one key that releases an acknowledgement hold rather than honouring it:
+        // pausing *is* a request to move this row, so holding it back would defeat the
+        // key rather than steady the view. Kept here, not in the key handler, so the rule
+        // travels with the toggle and can be tested with it.
+        ackHolds?.Remove(id);
         return true;
     }
 
@@ -794,6 +845,54 @@ public sealed class WatcherApp
         }
     }
 
+    /// <summary>
+    /// Freezes a pane's sort position at the moment it is acknowledged, for
+    /// <paramref name="holdSeconds"/>. <paramref name="preAck"/> must be the view as it
+    /// was <em>before</em> the acknowledgement, since that is the position being kept.
+    /// <para>
+    /// A hold for a pane that already has one simply replaces it, which is what a second
+    /// acknowledgement should do: it can only happen if the pane re-entered DONE while
+    /// the first hold was still live, and the fresh capture is then the accurate one.
+    /// </para>
+    /// </summary>
+    internal static void RecordAckHold(
+        IDictionary<string, AckHold> holds,
+        TrackedPaneView preAck,
+        double holdSeconds,
+        DateTimeOffset now)
+    {
+        if (holdSeconds <= 0)
+            return;
+
+        holds[preAck.Pane.Id] = new AckHold(
+            Priority(preAck.State), preAck.EnteredAt, now + TimeSpan.FromSeconds(holdSeconds));
+    }
+
+    /// <summary>
+    /// Drops the holds that have run out, and any belonging to a pane that is no longer
+    /// there so the map cannot accumulate entries for closed panes.
+    /// <para>
+    /// Called once per poll and nowhere else. That is the whole of the "released only by
+    /// a poll" rule: no key handler can reach it, so the deadline cannot be satisfied by
+    /// a keystroke, and the row's eventual move is never coincident with one.
+    /// </para>
+    /// </summary>
+    internal static void ExpireHolds(
+        IDictionary<string, AckHold> holds,
+        IEnumerable<string> presentPaneIds,
+        DateTimeOffset now)
+    {
+        if (holds.Count == 0)
+            return;
+
+        var present = new HashSet<string>(presentPaneIds, StringComparer.Ordinal);
+        foreach (var id in holds.Keys.ToList())
+        {
+            if (!present.Contains(id) || holds[id].ReleaseAt <= now)
+                holds.Remove(id);
+        }
+    }
+
     private void SwitchTo(Pane pane) => SwitchTo(_tmux, pane);
 
     /// <summary>
@@ -814,14 +913,27 @@ public sealed class WatcherApp
     /// each group WAITING rises to the top and ties break by most-recently-entered.
     /// The result is a single list (active first, then paused) so a continuous,
     /// global row number can address any visible pane.
+    /// <para>
+    /// A pane under an <see cref="AckHold"/> sorts by its pinned key rather than its
+    /// current state, which is what keeps a just-acknowledged row still. Applying holds
+    /// is all this does with them - it never expires one, so no rebuild driven by a
+    /// keystroke can release a hold. See <see cref="ExpireHolds"/>.
+    /// </para>
     /// </summary>
     internal static List<TrackedPaneView> OrderAll(
-        IReadOnlyList<TrackedPaneView> panes, IReadOnlySet<string> pausedIds) =>
+        IReadOnlyList<TrackedPaneView> panes,
+        IReadOnlySet<string> pausedIds,
+        IReadOnlyDictionary<string, AckHold>? ackHolds = null) =>
         panes
             .OrderBy(p => pausedIds.Contains(p.Pane.Id) ? 1 : 0)
-            .ThenBy(p => Priority(p.State))
-            .ThenByDescending(p => p.EnteredAt)
+            .ThenBy(p => Held(ackHolds, p) is { } h ? h.Priority : Priority(p.State))
+            .ThenByDescending(p => Held(ackHolds, p) is { } h ? h.EnteredAt : p.EnteredAt)
             .ToList();
+
+    /// <summary>The hold covering this pane, or null when it is free to sort normally.</summary>
+    private static AckHold? Held(
+        IReadOnlyDictionary<string, AckHold>? ackHolds, TrackedPaneView pane) =>
+        ackHolds is not null && ackHolds.TryGetValue(pane.Pane.Id, out var hold) ? hold : null;
 
     /// <summary>
     /// Attention-first ordering, shared by the live tables and the one-shot output so the
