@@ -183,10 +183,31 @@ public sealed class AgentProfile
         return glyphs.Length == 0 ? "(?!)" : $"[{glyphs}]"; // (?!) never matches when no glyphs set
     }
 
-    public Regex? CompileSessionConvention() =>
-        string.IsNullOrWhiteSpace(SessionNameConvention)
+    /// <summary>
+    /// Cache for <see cref="CompileSessionConvention"/>, keyed on the pattern the
+    /// compiled regex came from. Unlike the classifier's patterns - compiled once into
+    /// fields by its constructor - this one is reached through <see cref="MatchesSession"/>
+    /// on the discovery hot path: once per unmatched pane per profile, every poll. A
+    /// RegexOptions.Compiled build emits IL, so recompiling it there burned dozens of
+    /// throwaway regexes a tick. The properties on this type are settable (it is
+    /// deserialised from config), hence keying on the pattern rather than a plain
+    /// once-only field: a later edit to the convention still takes effect.
+    /// </summary>
+    private (string Pattern, Regex? Compiled)? _sessionConvention;
+
+    public Regex? CompileSessionConvention()
+    {
+        var pattern = SessionNameConvention;
+        if (_sessionConvention is { } cached &&
+            string.Equals(cached.Pattern, pattern, StringComparison.Ordinal))
+            return cached.Compiled;
+
+        var compiled = string.IsNullOrWhiteSpace(pattern)
             ? null
-            : new Regex(SessionNameConvention, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+            : new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        _sessionConvention = (pattern, compiled);
+        return compiled;
+    }
 
     /// <summary>
     /// Matches the foreground command against this agent's command, comparing the

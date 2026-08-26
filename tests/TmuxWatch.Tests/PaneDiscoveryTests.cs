@@ -343,4 +343,31 @@ public class PaneDiscoveryTests
         Assert.Empty(result.Panes);
         Assert.Contains("tmux not found", result.Error);
     }
+
+    /// <summary>
+    /// The session-name backstop is on the discovery hot path - MatchProfile calls it once
+    /// per profile for every pane whose command did not match, every poll - and a
+    /// RegexOptions.Compiled build emits IL. Compiling it per call burned dozens of
+    /// throwaway regexes a tick; the cache is keyed on the pattern so a config edit still
+    /// takes effect.
+    /// </summary>
+    [Fact]
+    public void Session_convention_regex_is_compiled_once_and_recompiled_when_the_pattern_changes()
+    {
+        var profile = new AgentProfile { SessionNameConvention = "^cop-" };
+
+        var first = profile.CompileSessionConvention();
+        Assert.NotNull(first);
+        Assert.Same(first, profile.CompileSessionConvention());
+
+        profile.SessionNameConvention = "^cl-";
+        var second = profile.CompileSessionConvention();
+        Assert.NotNull(second);
+        Assert.NotSame(first, second);
+        Assert.Matches(second, "cl-experiment");
+        Assert.DoesNotMatch(second, "cop-experiment");
+
+        profile.SessionNameConvention = "";
+        Assert.Null(profile.CompileSessionConvention());
+    }
 }
