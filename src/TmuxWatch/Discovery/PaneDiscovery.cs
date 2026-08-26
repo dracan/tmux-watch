@@ -33,9 +33,49 @@ public sealed record PaneInventory(
 /// </summary>
 public sealed class PaneDiscovery
 {
-    // Field order must match Parse(); '|' separates fields.
+    /// <summary>
+    /// Field separator for <see cref="Format"/> and <see cref="Parse"/>.
+    /// <para>
+    /// It stays a printable character because tmux gives no safe alternative: format
+    /// output is escaped, so an ASCII unit separator comes back as the four literal
+    /// characters <c>\037</c> and cannot be split on, while a tab survives in the format
+    /// string <em>and</em> in the data, so it is no safer than '|'. tmux's own
+    /// <c>#{s/.../.../:...}</c> substitution would sanitise the fields at source, but it is a
+    /// tmux 2.9+ feature and this watcher documents a psmux host, where an unsupported
+    /// format token would break enumeration outright - a worse failure than the one being
+    /// fixed. So the delimiter is one the data can contain, and <see cref="Parse"/> is
+    /// arranged so that when it does, nothing load-bearing moves.
+    /// </para>
+    /// </summary>
+    public const char FieldSeparator = '|';
+
+    /// <summary>
+    /// Field order for <see cref="Parse"/>. Not the order a human would pick: the
+    /// numeric and boolean fields come first <em>because</em> they cannot contain the
+    /// delimiter, and the three free-text ones are herded to the end.
+    /// <para>
+    /// A window name is whatever <c>rename-window</c> or automatic-rename produced
+    /// ("build | watch"), a session name may hold a '|' too (tmux forbids only '.' and
+    /// ':'), and a POSIX path admits every byte but NUL and '/'. With those fields
+    /// interleaved, one stray '|' shifted every later field: the pane lost its focus
+    /// marker, the pid guard against reused pane ids read a boolean, and the activity
+    /// stamp read the pid, rendering an in-state age of some twenty thousand days.
+    /// </para>
+    /// <para>
+    /// Now every field that feeds a decision - identity, jump target, agent match, focus,
+    /// pid, activity - is parsed before the first field that can carry a delimiter, so
+    /// none of them can shift. Of the three that follow, ordering is by consequence:
+    /// <c>pane_current_command</c> (agent matching) first, then <c>session_name</c>
+    /// (jump target), then the two purely cosmetic ones. <c>window_name</c> is last so
+    /// the bounded split hands it every remaining character verbatim - it is the field
+    /// most likely to hold a '|', and this makes it exact rather than merely harmless.
+    /// </para>
+    /// </summary>
     public const string Format =
-        "#{pane_id}|#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_dead}|#{window_name}|#{pane_current_path}|#{window_active}|#{pane_active}|#{pane_pid}|#{window_activity}";
+        "#{pane_id}|#{window_index}|#{pane_index}|#{pane_dead}|#{window_active}|#{pane_active}|#{pane_pid}|#{window_activity}|#{pane_current_command}|#{session_name}|#{pane_current_path}|#{window_name}";
+
+    /// <summary>Number of fields <see cref="Format"/> emits.</summary>
+    internal const int FieldCount = 12;
 
     private readonly ITmuxClient _tmux;
     private readonly IReadOnlyList<AgentProfile> _agents;
@@ -132,7 +172,9 @@ public sealed class PaneDiscovery
         if (string.IsNullOrWhiteSpace(line))
             return null;
 
-        var parts = line.Split('|');
+        // Bounded: the last field absorbs every remaining delimiter, so a window name
+        // containing '|' arrives whole rather than splitting the line. See Format.
+        var parts = line.Split(FieldSeparator, FieldCount);
         if (parts.Length < 6)
             return null;
 
@@ -140,23 +182,25 @@ public sealed class PaneDiscovery
         if (id.Length == 0)
             return null;
 
-        _ = int.TryParse(parts[2], out var win);
-        _ = int.TryParse(parts[3], out var pane);
-        var dead = parts[5].Trim() == "1";
-        var windowName = parts.Length > 6 ? parts[6].Trim() : "";
-        var currentPath = parts.Length > 7 ? parts[7].Trim() : "";
-        var windowActive = parts.Length > 8 && parts[8].Trim() == "1";
-        var paneActive = parts.Length > 9 && parts[9].Trim() == "1";
+        _ = int.TryParse(parts[1], out var win);
+        _ = int.TryParse(parts[2], out var pane);
+        var dead = parts[3].Trim() == "1";
+        var windowActive = parts[4].Trim() == "1";
+        var paneActive = parts[5].Trim() == "1";
         var pid = 0;
-        if (parts.Length > 10)
-            _ = int.TryParse(parts[10].Trim(), out pid);
+        if (parts.Length > 6)
+            _ = int.TryParse(parts[6].Trim(), out pid);
         // An absent, empty, or unparseable activity stamp degrades to 0 ("unknown")
         // rather than failing the whole line - a host that does not supply
         // #{window_activity} must still enumerate.
         long activity = 0;
-        if (parts.Length > 11)
-            _ = long.TryParse(parts[11].Trim(), out activity);
+        if (parts.Length > 7)
+            _ = long.TryParse(parts[7].Trim(), out activity);
+        var command = parts.Length > 8 ? parts[8].Trim() : "";
+        var session = parts.Length > 9 ? parts[9] : "";
+        var currentPath = parts.Length > 10 ? parts[10].Trim() : "";
+        var windowName = parts.Length > 11 ? parts[11].Trim() : "";
 
-        return new Pane(id, parts[1], win, pane, parts[4].Trim(), dead, windowName, currentPath, windowActive, paneActive, pid, "", activity);
+        return new Pane(id, session, win, pane, command, dead, windowName, currentPath, windowActive, paneActive, pid, "", activity);
     }
 }

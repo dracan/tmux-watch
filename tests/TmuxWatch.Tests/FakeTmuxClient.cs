@@ -12,7 +12,17 @@ public sealed class FakeTmuxClient : ITmuxClient
     public bool Started { get; set; } = true;
     public int ExitCode { get; set; }
     public string ErrorMessage { get; set; } = "";
-    public string ListOutput { get; set; } = "";
+    /// <summary>
+    /// Scripted <c>lsp</c> output, written in readable field order and stored in the
+    /// wire order the real format uses. See <see cref="TestPanes"/>.
+    /// </summary>
+    public string ListOutput
+    {
+        get => _listOutput;
+        set => _listOutput = TestPanes.Line(value);
+    }
+
+    private string _listOutput = "";
     public Dictionary<string, string> Captures { get; } = new();
 
     public List<string> SwitchedSessions { get; } = new();

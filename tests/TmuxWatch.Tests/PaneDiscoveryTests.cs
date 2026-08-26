@@ -1,14 +1,89 @@
 using TmuxWatch.Config;
 using TmuxWatch.Discovery;
+using TmuxWatch.Tmux;
 
 namespace TmuxWatch.Tests;
 
 public class PaneDiscoveryTests
 {
+    /// <summary>Parses a line written in readable field order. See <see cref="TestPanes"/>.</summary>
+    private static Pane? Parse(string line) => PaneDiscovery.Parse(TestPanes.Line(line));
+
+    /// <summary>Builds a line in the real wire order, for the tests that are about that order.</summary>
+    private static string Wire(params string[] fields) => string.Join(PaneDiscovery.FieldSeparator, fields);
+
+    /// <summary>
+    /// The delimiter is one the data can contain (tmux offers no safe alternative - see
+    /// the doc comment on Format), so the guarantee is positional instead: every field
+    /// that feeds a decision is parsed before the first field that can carry a '|', and
+    /// the last field absorbs the remainder. A window named "build | watch" used to shift
+    /// everything after it - no focus marker, a pid guard reading a boolean, an activity
+    /// stamp reading the pid and rendering an in-state age of some twenty thousand days.
+    /// </summary>
+    [Fact]
+    public void A_pipe_in_the_window_name_shifts_nothing_and_is_kept_whole()
+    {
+        var pane = PaneDiscovery.Parse(Wire(
+            "%12", "3", "0", "0", "1", "1", "4242", "1784969224",
+            "claude", "work", "/home/dan/code", "build | watch"));
+
+        Assert.NotNull(pane);
+        Assert.Equal("build | watch", pane!.WindowName);
+        Assert.Equal("%12", pane.Id);
+        Assert.Equal("work:3", pane.WindowTarget);
+        Assert.Equal("claude", pane.Command);
+        Assert.True(pane.IsFocused);
+        Assert.Equal(4242, pane.Pid);
+        Assert.Equal(1784969224, pane.WindowActivityUnix);
+    }
+
+    /// <summary>
+    /// A '|' in the two fields ahead of the window name still costs something - they are
+    /// the only ones it can - but the damage stops at cosmetics. Nothing that decides
+    /// identity, targeting, focus, agent match, pid, or activity sits after them.
+    /// </summary>
+    [Fact]
+    public void A_pipe_in_the_path_leaves_every_decision_field_intact()
+    {
+        var pane = PaneDiscovery.Parse(Wire(
+            "%13", "2", "1", "0", "1", "1", "99", "1784969224",
+            "copilot", "work", "/home/dan/a|b", "shell"));
+
+        Assert.NotNull(pane);
+        Assert.Equal("%13", pane!.Id);
+        Assert.Equal("work:2", pane.WindowTarget);
+        Assert.Equal(1, pane.PaneIndex);
+        Assert.Equal("copilot", pane.Command);
+        Assert.True(pane.IsFocused);
+        Assert.Equal(99, pane.Pid);
+        Assert.Equal(1784969224, pane.WindowActivityUnix);
+    }
+
+    /// <summary>The format tmux is handed must emit exactly the fields Parse reads.</summary>
+    [Fact]
+    public void Format_emits_the_field_count_Parse_expects() =>
+        Assert.Equal(PaneDiscovery.FieldCount - 1,
+            PaneDiscovery.Format.Count(c => c == PaneDiscovery.FieldSeparator));
+
+    /// <summary>
+    /// The free-text fields must all come after the decision fields, which is the whole
+    /// basis of the guarantee above. Asserted on the format string so a later reorder
+    /// that quietly moves one forward fails here.
+    /// </summary>
+    [Fact]
+    public void Format_puts_every_free_text_field_after_every_decision_field()
+    {
+        var fields = PaneDiscovery.Format.Split(PaneDiscovery.FieldSeparator);
+        var freeText = new[] { "#{pane_current_command}", "#{session_name}", "#{pane_current_path}", "#{window_name}" };
+        var firstFree = fields.Select((f, i) => (f, i)).First(x => freeText.Contains(x.f)).i;
+
+        Assert.All(fields.Skip(firstFree), f => Assert.Contains(f, freeText));
+    }
+
     [Fact]
     public void Parse_reads_all_fields()
     {
-        var pane = PaneDiscovery.Parse("%10|web-api|2|0|copilot|0|copilot|C:\\dev\\web-api");
+        var pane = Parse("%10|web-api|2|0|copilot|0|copilot|C:\\dev\\web-api");
         Assert.NotNull(pane);
         Assert.Equal("%10", pane!.Id);
         Assert.Equal("web-api", pane.SessionName);
@@ -24,40 +99,46 @@ public class PaneDiscoveryTests
     [Fact]
     public void Parse_reads_focus_flags()
     {
-        var focused = PaneDiscovery.Parse("%4|s|1|0|copilot|0|REST API|C:\\dev\\rest|1|1");
+        var focused = Parse("%4|s|1|0|copilot|0|REST API|C:\\dev\\rest|1|1");
         Assert.NotNull(focused);
         Assert.True(focused!.WindowActive);
         Assert.True(focused.PaneActive);
         Assert.True(focused.IsFocused);
 
         // Active pane but in a non-active window is NOT focused.
-        var background = PaneDiscovery.Parse("%1|s|0|0|copilot|0|Other|C:\\dev\\other|0|1");
+        var background = Parse("%1|s|0|0|copilot|0|Other|C:\\dev\\other|0|1");
         Assert.False(background!.IsFocused);
     }
 
+    /// <summary>
+    /// A host that supplies only the leading fields must still enumerate; the rest
+    /// degrade to empty rather than failing the line.
+    /// </summary>
     [Fact]
-    public void Parse_tolerates_legacy_six_field_lines()
+    public void Parse_tolerates_a_truncated_line()
     {
-        var pane = PaneDiscovery.Parse("%1|s|0|0|copilot|0");
+        var pane = PaneDiscovery.Parse(Wire("%1", "0", "0", "0", "0", "0"));
         Assert.NotNull(pane);
         Assert.Equal("", pane!.WindowName);
         Assert.Equal("", pane.CurrentPath);
+        Assert.Equal("", pane.Command);
+        Assert.Equal(0, pane.Pid);
     }
 
     [Fact]
     public void Parse_detects_dead_flag()
     {
-        var pane = PaneDiscovery.Parse("%5|work|0|1|bash|1");
+        var pane = Parse("%5|work|0|1|bash|1");
         Assert.True(pane!.Dead);
     }
 
     [Fact]
-    public void Parse_ignores_blank_lines() => Assert.Null(PaneDiscovery.Parse("   "));
+    public void Parse_ignores_blank_lines() => Assert.Null(Parse("   "));
 
     [Fact]
     public void Parse_reads_the_window_activity_timestamp()
     {
-        var pane = PaneDiscovery.Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123|1784969224");
+        var pane = Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123|1784969224");
         Assert.Equal(1784969224, pane!.WindowActivityUnix);
 
         var now = DateTimeOffset.FromUnixTimeSeconds(1784969224).AddMinutes(5);
@@ -69,11 +150,11 @@ public class PaneDiscoveryTests
     {
         // Absent (a host that does not supply the field) and unparseable both degrade to
         // "unknown" rather than failing the line.
-        var absent = PaneDiscovery.Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123");
+        var absent = PaneDiscovery.Parse(Wire("%2", "0", "0", "0", "0", "0", "123"));
         Assert.Equal(0, absent!.WindowActivityUnix);
         Assert.Null(absent.TimeSinceActivity(DateTimeOffset.UnixEpoch));
 
-        var garbage = PaneDiscovery.Parse("%3|s|0|0|bash|0|shell|/home/dan|0|0|123|not-a-number");
+        var garbage = Parse("%3|s|0|0|bash|0|shell|/home/dan|0|0|123|not-a-number");
         Assert.NotNull(garbage);
         Assert.Equal(0, garbage!.WindowActivityUnix);
     }
@@ -81,7 +162,7 @@ public class PaneDiscoveryTests
     [Fact]
     public void Activity_elapsed_never_goes_negative()
     {
-        var pane = PaneDiscovery.Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123|1784969224");
+        var pane = Parse("%2|s|0|0|bash|0|shell|/home/dan|0|0|123|1784969224");
         var before = DateTimeOffset.FromUnixTimeSeconds(1784969224).AddMinutes(-5);
         Assert.Equal(TimeSpan.Zero, pane!.TimeSinceActivity(before));
     }
