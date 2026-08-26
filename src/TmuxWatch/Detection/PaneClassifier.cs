@@ -118,11 +118,22 @@ public sealed class PaneClassifier
         // do not match a stray "esc to cancel" appearing elsewhere. The cancel text
         // is matched case-insensitively so a capitalised footer ("Esc to cancel",
         // as the current Claude build renders it) still matches.
-        foreach (var line in statusText.Split('\n'))
+        // Both markers must be configured for the check to run at all. string.Contains("")
+        // is always true, so an empty marker would make the pair match every non-blank
+        // line and pin the pane in WAITING - top priority, so it chimes, reddens the
+        // pointer and never reaches DONE. Empty-means-disabled is the idiom everywhere
+        // else on the profile (IsWorking guards its own marker the same way, and the
+        // shipped Claude profile switches WorkingFooterCancelMarker off by emptying it),
+        // so someone writing a third-agent profile has been shown exactly this move.
+        if (_profile.WaitingFooterNavMarker.Length > 0 &&
+            _profile.WaitingFooterCancelMarker.Length > 0)
         {
-            if (line.Contains(_profile.WaitingFooterNavMarker, StringComparison.Ordinal) &&
-                line.Contains(_profile.WaitingFooterCancelMarker, StringComparison.OrdinalIgnoreCase))
-                return true;
+            foreach (var line in statusText.Split('\n'))
+            {
+                if (line.Contains(_profile.WaitingFooterNavMarker, StringComparison.Ordinal) &&
+                    line.Contains(_profile.WaitingFooterCancelMarker, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
         }
 
         return false;

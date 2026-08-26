@@ -14,6 +14,29 @@ public class PaneClassifierTests
         return File.ReadAllText(path);
     }
 
+    /// <summary>
+    /// Emptying a marker is how this codebase switches a token off - IsWorking guards its
+    /// own that way, AgentProfile.CompileOrNull returns null for an empty pattern, and the
+    /// shipped Claude profile empties WorkingFooterCancelMarker for exactly that reason.
+    /// Applied to the waiting pair it used to do the opposite: string.Contains("") is
+    /// always true, so every non-blank line matched and the pane pinned in WAITING - top
+    /// priority, so it chimed, reddened the pointer, and never reached DONE.
+    /// </summary>
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("\u2191/\u2193", "")]
+    [InlineData("", "esc to cancel")]
+    public void An_emptied_waiting_footer_marker_disables_the_check_rather_than_matching_everything(
+        string nav, string cancel)
+    {
+        var profile = WatchConfig.ClaudeProfile();
+        profile.WaitingFooterNavMarker = nav;
+        profile.WaitingFooterCancelMarker = cancel;
+
+        var idle = Fixture("claude-idle.txt");
+        Assert.NotEqual(PaneState.Waiting, new PaneClassifier(profile).Classify(idle, dead: false));
+    }
+
     [Theory]
     [InlineData("waiting-command-approval.txt", PaneState.Waiting)]
     [InlineData("waiting-ask-user.txt", PaneState.Waiting)]
