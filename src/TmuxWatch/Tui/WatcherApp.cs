@@ -56,6 +56,13 @@ internal readonly record struct AckHold(
 /// </summary>
 public sealed class WatcherApp
 {
+    /// <summary>
+    /// Floor for the poll interval, in milliseconds. Low enough that no sane
+    /// <c>--interval</c> is altered, high enough that a zero or negative one cannot
+    /// turn the wait loop into a busy spin over tmux. See <see cref="Run"/>.
+    /// </summary>
+    internal const int MinPollMs = 250;
+
     private readonly AttentionMonitor _monitor;
     private readonly ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
@@ -144,9 +151,27 @@ public sealed class WatcherApp
     private void DrivePointer(IReadOnlyList<TrackedPaneView> agentViews) =>
         _pointer.SetState(AggregatePointerState(agentViews, _paused));
 
+    /// <summary>
+    /// The poll slice for a configured interval, floored at <see cref="MinPollMs"/> -
+    /// clamped at the point of use like every other timing knob (see AttentionMonitor's
+    /// constructor). Zero or negative makes the wait loop's body unreachable: no sleep,
+    /// no key handling, and Tick() re-enters at once, forking an `lsp` plus a
+    /// capture-pane per agent pane as fast as the process can. That is a pegged core and
+    /// a watcher answering nothing but SIGINT, from `--interval 0` or a stray minus sign
+    /// (both parse, neither was checked). NaN falls through the comparison, so it is
+    /// mapped explicitly rather than left to cast to zero.
+    /// </summary>
+    internal static int PollMsFor(double seconds)
+    {
+        if (double.IsNaN(seconds))
+            return MinPollMs;
+        var ms = seconds * 1000;
+        return ms >= MinPollMs ? (int)Math.Min(ms, int.MaxValue) : MinPollMs;
+    }
+
     public void Run(CancellationToken token)
     {
-        var pollMs = (int)(_cfg.PollIntervalSeconds * 1000);
+        var pollMs = PollMsFor(_cfg.PollIntervalSeconds);
 
         // Deliberately not disposed: disposing a writer over Console.OpenStandardOutput()
         // closes stdout itself, which would silently swallow anything written after Run

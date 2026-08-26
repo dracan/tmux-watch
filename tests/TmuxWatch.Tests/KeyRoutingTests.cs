@@ -130,4 +130,29 @@ public class KeyRoutingTests
         Assert.Equal(WatcherApp.KeyAction.Ignore, Closed(Char('z')));
         Assert.Equal(WatcherApp.KeyAction.Ignore, Closed(Char('0')));
     }
+
+    /// <summary>
+    /// The poll slice is floored, like every other timing knob. `--interval 0` (and a
+    /// negative one - double.TryParse accepts "-1", and pollIntervalSeconds in config was
+    /// equally unchecked) made the wait loop's body unreachable: no sleep, no key
+    /// handling, and Tick() re-entering at once over tmux.
+    /// </summary>
+    [Theory]
+    [InlineData(0, WatcherApp.MinPollMs)]
+    [InlineData(-1, WatcherApp.MinPollMs)]
+    [InlineData(0.05, WatcherApp.MinPollMs)]
+    [InlineData(0.25, WatcherApp.MinPollMs)]
+    [InlineData(2, 2000)]
+    [InlineData(60, 60000)]
+    public void Poll_interval_is_floored(double seconds, int expected) =>
+        Assert.Equal(expected, WatcherApp.PollMsFor(seconds));
+
+    [Fact]
+    public void Poll_interval_survives_nan_and_absurd_values()
+    {
+        Assert.Equal(WatcherApp.MinPollMs, WatcherApp.PollMsFor(double.NaN));
+        Assert.Equal(WatcherApp.MinPollMs, WatcherApp.PollMsFor(double.NegativeInfinity));
+        Assert.True(WatcherApp.PollMsFor(double.PositiveInfinity) > 0);
+        Assert.True(WatcherApp.PollMsFor(1e12) > 0);
+    }
 }
