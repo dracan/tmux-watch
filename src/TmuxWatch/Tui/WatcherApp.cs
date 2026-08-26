@@ -442,7 +442,12 @@ public sealed class WatcherApp
         if (promptOpen)
             return KeyAction.PromptInput;
 
-        if (key.Key is ConsoleKey.Q or ConsoleKey.Escape)
+        // Quit matches esc by named key but 'q' by *character*, not ConsoleKey.Q.
+        // ConsoleKeyInfo.Key is the physical key, so shift+Q - the address key for row
+        // 26, routine once Other panes lists a whole server - arrives as ConsoleKey.Q
+        // too and would exit the watcher instead of jumping. Every other single-letter
+        // command already matches on KeyChar, which is why only this one collided.
+        if (key.Key == ConsoleKey.Escape)
             return KeyAction.Quit;
         if (key.Key == ConsoleKey.UpArrow)
             return KeyAction.MoveUp;
@@ -453,6 +458,7 @@ public sealed class WatcherApp
 
         return key.KeyChar switch
         {
+            'q' => KeyAction.Quit,
             'p' => KeyAction.TogglePauseRow,
             'w' => KeyAction.ToggleWide,
             'o' => KeyAction.ToggleOthers,
