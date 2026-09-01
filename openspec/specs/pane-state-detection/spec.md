@@ -324,25 +324,50 @@ A profile that configures neither token SHALL never produce BACKGND, and a profi
 configures only one SHALL be classified from that one alone, leaving its behaviour
 otherwise unchanged.
 
+**The classifier SHALL report, alongside the BACKGND state, a `reason` naming which of the
+two fingerprints matched.** The reason SHALL distinguish three cases: the counter alone,
+the agent row alone, and both present on one screen. Matching SHALL NOT stop at the first
+fingerprint found, because the two are not mutually exclusive on screen and a consumer that
+treats them differently needs to know when both apply.
+
+The reason exists because the two fingerprints describe background work with different
+termination guarantees. A shell or monitor may run indefinitely - a dev server never exits
+on its own - whereas a detached sub-agent always terminates and removes its own row when it
+reports. Consumers that need a backstop against work which never finishes SHALL be able to
+apply it to the first kind without applying it to the second.
+
+The reason SHALL NOT become a distinct pane state. BACKGND remains one state with one
+badge, one priority rank and one position in the classification precedence, whatever its
+reason. Ordering the two fingerprints against each other, or splitting BACKGND in the
+precedence chain, is explicitly NOT part of this requirement.
+
+The reason SHALL be derived from the capture alone, carrying no history, so the classifier
+stays stateless and fixture-testable.
+
 #### Scenario: Finished turn with a background shell is BACKGND
 
 - **WHEN** a Claude pane shows its composer box with no selection prompt and no live spinner line, and its footer reads `-- INSERT -- ⏵⏵ auto mode on · 1 shell · ← for agents`
-- **THEN** the pane is classified as BACKGND, not IDLE and not Unknown
+- **THEN** the pane is classified as BACKGND, not IDLE and not Unknown, with a reason naming the background-task counter alone
 
 #### Scenario: Finished turn with a background monitor is BACKGND
 
 - **WHEN** a Claude pane's chrome carries `· 1 monitor ·` (or `· 4 monitors ·`) with no shells counted, and neither WAITING nor WORKING is present
-- **THEN** the pane is classified as BACKGND, on the same footing as a background shell
+- **THEN** the pane is classified as BACKGND, on the same footing as a background shell, with a reason naming the background-task counter alone
 
 #### Scenario: Both kinds counted in one segment
 
 - **WHEN** the footer reads `· 2 shells · 1 monitor ·`
-- **THEN** the pane is classified as BACKGND
+- **THEN** the pane is classified as BACKGND, with a reason naming the background-task counter alone, because shells and monitors share that one fingerprint
 
 #### Scenario: Finished turn with a detached background sub-agent is BACKGND
 
 - **WHEN** a Claude pane shows its composer box, a footer carrying no background-task counter (for example `-- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents`), and a fleet panel below that footer whose rows read `● main` followed by `◯ slow-sweep  Sweep every source file under … 2m 5s · ↓ 104.3k tokens`
-- **THEN** the pane is classified as BACKGND, not IDLE
+- **THEN** the pane is classified as BACKGND, not IDLE, with a reason naming the background-agent row alone
+
+#### Scenario: A sub-agent and a shell together report both reasons
+
+- **WHEN** a Claude pane's chrome carries both a background-task counter (`· 1 shell ·`) and a fleet panel listing at least one `◯` agent row
+- **THEN** the pane is classified as BACKGND with a reason naming both fingerprints, not just whichever was tested first
 
 #### Scenario: Newly launched sub-agent with no activity meter is BACKGND
 
@@ -352,12 +377,17 @@ otherwise unchanged.
 #### Scenario: Several background sub-agents are still one BACKGND
 
 - **WHEN** the fleet panel lists more than one `◯` agent row
-- **THEN** the pane is classified as BACKGND, exactly as for a single row
+- **THEN** the pane is classified as BACKGND with the background-agent-row reason, exactly as for a single row
 
 #### Scenario: The main fleet row alone is not BACKGND
 
 - **WHEN** the chrome below the composer carries a `● main` row and no `◯` agent row, and no background-task counter
 - **THEN** the pane is classified as IDLE, because the main row is present regardless of whether any agent is running
+
+#### Scenario: A profile with no agent-row token reports only the counter reason
+
+- **WHEN** a pane is classified with an agent profile that configures a background-task counter but no background-agent row token, such as the Copilot profile, and its chrome carries a counter
+- **THEN** the pane is classified as BACKGND with a reason naming the counter alone, and the profile's behaviour is otherwise unchanged
 
 #### Scenario: Background task while the agent works is still WORKING
 
@@ -409,3 +439,7 @@ otherwise unchanged.
 - **WHEN** a Copilot pane is classified using a profile that configures neither a background-task token nor a background-agent row token
 - **THEN** the pane is never classified BACKGND and resolves to its existing state
 
+#### Scenario: A non-BACKGND verdict carries no reason
+
+- **WHEN** a pane is classified as WAITING, WORKING, IDLE, DEAD or Unknown, including a screen that carries a background-agent row but is WORKING because a live spinner line outranks it
+- **THEN** the reported reason is empty, because the reason is a property of BACKGND rather than of the screen

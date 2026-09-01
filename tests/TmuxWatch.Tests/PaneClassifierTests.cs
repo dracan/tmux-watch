@@ -366,7 +366,13 @@ public class PaneClassifierTests
     public void Background_task_counter_forms(string footer)
     {
         var text = $"● Earlier output\n────\n❯\n────\n{footer}";
-        Assert.Equal(PaneState.Backgnd, ClaudeClassifier.Classify(text, dead: false));
+        var verdict = ClaudeClassifier.Inspect(text, dead: false);
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+
+        // Shells and monitors share the one fingerprint and are not told apart from each
+        // other - including when both are counted in the same segment. What matters is that
+        // no agent flag is set, because that is what admits the grace-period backstop.
+        Assert.Equal(BackgndReason.BackgroundTask, verdict.Reason);
     }
 
     [Fact]
@@ -442,7 +448,9 @@ public class PaneClassifierTests
         var text = $"● Earlier output\n────\n❯\n────\n{PlainFooter}\n\n{MainRow}\n" +
                    $"{AgentRow("sweep-one", "2m 5s · ↓ 104.3k tokens")}\n" +
                    $"{AgentRow("sweep-two", "8s · ↓ 1.2k tokens")}";
-        Assert.Equal(PaneState.Backgnd, ClaudeClassifier.Classify(text, dead: false));
+        var verdict = ClaudeClassifier.Inspect(text, dead: false);
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+        Assert.Equal(BackgndReason.BackgroundAgent, verdict.Reason);
     }
 
     [Fact]
@@ -491,5 +499,134 @@ public class PaneClassifierTests
         Assert.NotEmpty(claude.BackgroundAgentRowPattern);
         Assert.NotEqual(claude.BackgroundTaskPattern, claude.BackgroundAgentRowPattern);
         Assert.Empty(WatchConfig.CopilotProfile().BackgroundAgentRowPattern);
+    }
+
+    // ---- The BACKGND reason ------------------------------------------------
+
+    private const string ShellAndAgentFooter =
+        "  -- INSERT -- ⏵⏵ auto mode on · 1 shell · ← for agents";
+
+    [Fact]
+    public void Newly_launched_agent_row_reports_the_agent_reason()
+    {
+        // A just-launched agent renders a bare elapsed time and no token counter, which is
+        // why the bullet rather than the meter is the fingerprint. The reason must survive
+        // that form too, or the opening seconds of every agent would admit the backstop.
+        var text = $"● Earlier output\n────\n❯\n────\n{PlainFooter}\n\n{MainRow}\n" +
+                   $"{AgentRow("slow-sweep", "0s")}";
+        var verdict = ClaudeClassifier.Inspect(text, dead: false);
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+        Assert.Equal(BackgndReason.BackgroundAgent, verdict.Reason);
+    }
+
+    [Fact]
+    public void A_shell_alongside_an_agent_reports_both_reasons()
+    {
+        // The case that forbids short-circuiting. Whichever token is tested first, both
+        // must be reported: the shell alone would admit the grace period and announce a
+        // turn the parent agent has not finished.
+        var text = $"● Earlier output\n────\n❯\n────\n{ShellAndAgentFooter}\n\n{MainRow}\n" +
+                   $"{AgentRow("slow-sweep", "2m 5s · ↓ 104.3k tokens")}";
+        var verdict = ClaudeClassifier.Inspect(text, dead: false);
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+        Assert.Equal(BackgndReason.BackgroundTask | BackgndReason.BackgroundAgent, verdict.Reason);
+    }
+
+    [Fact]
+    public void Copilot_profile_can_only_ever_report_the_counter_reason()
+    {
+        // Copilot leaves the agent-row token empty, so the agent flag is unreachable for it
+        // and the grace-period gate is always satisfied. Its behaviour is unchanged by
+        // construction rather than by a separate code path.
+        var profile = WatchConfig.CopilotProfile();
+        profile.BackgroundTaskPattern = @"·\s*\d+\s+(shells?|monitors?)\s*(·|$)";
+        profile.IdlePromptPattern = @"^\s*❯(?!\s*\d+\.)";
+
+        var text = $"● Earlier output\n────\n❯\n────\n{ShellFooter}\n\n{MainRow}\n" +
+                   $"{AgentRow("slow-sweep", "2m 5s · ↓ 104.3k tokens")}";
+        var verdict = new PaneClassifier(profile).Inspect(text, dead: false);
+
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+        Assert.Equal(BackgndReason.BackgroundTask, verdict.Reason);
+        Assert.Empty(WatchConfig.CopilotProfile().BackgroundAgentRowPattern);
+    }
+
+    [Fact]
+    public void The_reason_does_not_alter_precedence()
+    {
+        // WORKING still outranks BACKGND whichever fingerprint is present, and a WORKING
+        // verdict carries no reason - the reason is a property of BACKGND, not of the
+        // screen.
+        var text = "✻ Waiting for 2 background agents to finish\n" +
+                   $"────\n❯\n────\n{ShellAndAgentFooter}\n\n{MainRow}\n" +
+                   $"{AgentRow("sweep-one", "2m 5s · ↓ 104.3k tokens")}";
+        var verdict = ClaudeClassifier.Inspect(text, dead: false);
+        Assert.Equal(PaneState.Working, verdict.State);
+        Assert.Equal(BackgndReason.None, verdict.Reason);
+    }
+
+    [Fact]
+    public void Every_non_backgnd_verdict_reports_no_reason()
+    {
+        // The reason is meaningful only for BACKGND. Anything else leaking a flag would
+        // give the monitor a gate to trip on a state that never reaches it.
+        var files = Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "fixtures"), "*.txt");
+        foreach (var file in files)
+        {
+            var text = File.ReadAllText(file);
+            foreach (var verdict in new[]
+                     {
+                         Classifier.Inspect(text, dead: false),
+                         ClaudeClassifier.Inspect(text, dead: false),
+                         ClaudeClassifier.Inspect(text, dead: true),
+                     })
+            {
+                if (verdict.State != PaneState.Backgnd)
+                    Assert.Equal(BackgndReason.None, verdict.Reason);
+                else
+                    Assert.NotEqual(BackgndReason.None, verdict.Reason);
+            }
+        }
+    }
+
+    [Fact]
+    public void Transcript_prose_yields_no_reason_at_all()
+    {
+        // The position rule is what keeps frozen prose from pinning the state. It must keep
+        // the reason clean too: a stale delegation line above the composer must not set the
+        // agent flag on a pane that is merely IDLE.
+        var text = "  ⎿  Running in the background as @slow-sweep\n" +
+                   "  ◯ quoted agent row inside transcript prose\n" +
+                   $"────\n❯\n────\n{PlainFooter}";
+        var verdict = ClaudeClassifier.Inspect(text, dead: false);
+        Assert.Equal(PaneState.Idle, verdict.State);
+        Assert.Equal(BackgndReason.None, verdict.Reason);
+    }
+
+    [Theory]
+    // The real captured shapes, not the hand-written screens above. These are the ones
+    // that must yield an agent-only reason: the footer carries no counter (agents are
+    // never counted there), so a pane whose only outstanding work is a sub-agent is
+    // visible solely as the panel row - and it is exactly this case that must not admit
+    // the grace-period backstop.
+    [InlineData("claude-backgnd-subagent-real.txt")]
+    [InlineData("claude-backgnd-subagent.txt")]
+    [InlineData("claude-backgnd-subagent-fresh.txt")]
+    public void Real_subagent_fixtures_report_the_agent_reason(string fixture)
+    {
+        var verdict = ClaudeClassifier.Inspect(Fixture(fixture), dead: false);
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+        Assert.Equal(BackgndReason.BackgroundAgent, verdict.Reason);
+    }
+
+    [Fact]
+    public void Real_shell_fixture_reports_the_counter_reason()
+    {
+        // The dev-server side of the split, from the same real-capture family. This one
+        // must keep admitting the backstop, or a shell that never exits withholds the
+        // chime forever - the behaviour the grace period exists for.
+        var verdict = ClaudeClassifier.Inspect(Fixture("claude-backgnd.txt"), dead: false);
+        Assert.Equal(PaneState.Backgnd, verdict.State);
+        Assert.Equal(BackgndReason.BackgroundTask, verdict.Reason);
     }
 }

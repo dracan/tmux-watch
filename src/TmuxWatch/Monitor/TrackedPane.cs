@@ -58,6 +58,19 @@ internal sealed class TrackedPane
     /// </summary>
     public DateTimeOffset? BackgndSince { get; set; }
 
+    /// <summary>
+    /// The BACKGND reason this pane reported on its previous poll, or
+    /// <see cref="BackgndReason.None"/> when it was not BACKGND.
+    ///
+    /// Exists to detect the reason *narrowing* - a sub-agent finishing while a shell it
+    /// started keeps running. The grace period does not apply while an agent is among the
+    /// outstanding work, so at that moment the shell becomes the only thing left and
+    /// deserves a full grace period measured from then, not from the pane's original entry
+    /// into BACKGND (which may already be hours past). Cleared wherever
+    /// <see cref="BackgndSince"/> is cleared, so a pane re-entering BACKGND is a fresh entry.
+    /// </summary>
+    public BackgndReason LastBackgndReason { get; set; }
+
     public TrackedPaneView ToView() =>
         new(Pane, State, EnteredAt, AttentionOutstanding);
 }

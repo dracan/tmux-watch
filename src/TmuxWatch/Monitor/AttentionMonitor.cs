@@ -87,9 +87,10 @@ public sealed class AttentionMonitor
             // capture is read-only; a failed capture leaves classification to
             // liveness facts (e.g. Unknown), never crashes the loop.
             var capture = _tmux.CapturePane(pane.Id);
-            var classified = _classifiers.TryGetValue(pane.AgentId, out var classifier)
-                ? classifier.Classify(capture.Ok ? capture.StdOut : null, pane.Dead)
-                : PaneState.Unknown;
+            var verdict = _classifiers.TryGetValue(pane.AgentId, out var classifier)
+                ? classifier.Inspect(capture.Ok ? capture.StdOut : null, pane.Dead)
+                : Classification.Of(PaneState.Unknown);
+            var classified = verdict.State;
 
             // A pane id whose root process pid changed is a different pane wearing a
             // reused id (e.g. the tmux server restarted inside the absence-debounce
@@ -128,7 +129,7 @@ public sealed class AttentionMonitor
             if (classified != PaneState.Unknown)
                 tracked.ConsecutiveUnknowns = 0;
 
-            var state = Promote(tracked, classified, now);
+            var state = Promote(tracked, classified, verdict.Reason, now);
 
             if (tracked.State != state)
             {
@@ -172,13 +173,24 @@ public sealed class AttentionMonitor
     /// path out of BACKGND without <see cref="TrackedPane.CompletionPending"/> announces
     /// nothing - which is what keeps first sight silent.
     /// </summary>
-    private PaneState Promote(TrackedPane tracked, PaneState classified, DateTimeOffset now)
+    private PaneState Promote(
+        TrackedPane tracked, PaneState classified, BackgndReason reason, DateTimeOffset now)
     {
         switch (classified)
         {
             case PaneState.Backgnd:
                 if (tracked.State != PaneState.Backgnd)
                     tracked.BackgndSince = now;
+                else if (tracked.LastBackgndReason.HasFlag(BackgndReason.BackgroundAgent) &&
+                         !reason.HasFlag(BackgndReason.BackgroundAgent))
+                    // The reason has *narrowed*: a sub-agent finished, but a shell it
+                    // started is still running. No grace timer ran while the agent was
+                    // outstanding, so the shell has never had one - start it here rather
+                    // than inheriting an entry time that is already past the grace period
+                    // and would promote instantly on this very poll.
+                    tracked.BackgndSince = now;
+
+                tracked.LastBackgndReason = reason;
 
                 // A turn that ends into a live shell defers its announcement rather than
                 // firing it. Only WORKING arms this: entering BACKGND from IDLE (a shell
@@ -188,13 +200,26 @@ public sealed class AttentionMonitor
 
                 // Once promoted, DONE persists across BACKGND as well as IDLE. Without
                 // this a grace-period promotion would drop straight back to BACKGND on
-                // the very next poll and undo its own announcement.
+                // the very next poll and undo its own announcement. It holds regardless of
+                // any later change of reason, so a sub-agent starting up afterwards does
+                // not pull an announced pane back to BACKGND.
                 if (tracked.State == PaneState.Done)
                     return PaneState.Done;
 
                 // Grace-period release: the shell has outlived the deferral, so announce
                 // rather than let a dev server swallow the chime forever.
+                //
+                // Gated on the reason being *exclusively* a background-task counter. The
+                // backstop exists for work that may never end on its own; a detached
+                // sub-agent always terminates and removes its own row, so it releases the
+                // pane itself - by classifying IDLE (chime) or WORKING (a new turn, which
+                // re-arms and announces in its own right). Running the timer on it instead
+                // announces a finished turn that has not finished: the parent is typically
+                // waiting to verify the sub-agent's work, so it is not the user's move, and
+                // because DONE persists across BACKGND the pane then misreports for the
+                // whole remainder of the run.
                 if (tracked.CompletionPending &&
+                    reason == BackgndReason.BackgroundTask &&
                     now - (tracked.BackgndSince ?? now) >= _backgroundGrace)
                 {
                     tracked.CompletionPending = false;
@@ -211,16 +236,19 @@ public sealed class AttentionMonitor
                 {
                     tracked.CompletionPending = false;
                     tracked.BackgndSince = null;
+                    tracked.LastBackgndReason = BackgndReason.None;
                     return PaneState.Done;
                 }
 
                 tracked.BackgndSince = null;
+                tracked.LastBackgndReason = BackgndReason.None;
                 return PaneState.Idle;
 
             case PaneState.Working:
                 // A new turn has begun; it will arm its own completion when it ends.
                 tracked.CompletionPending = false;
                 tracked.BackgndSince = null;
+                tracked.LastBackgndReason = BackgndReason.None;
                 return PaneState.Working;
 
             case PaneState.Waiting:
@@ -228,6 +256,7 @@ public sealed class AttentionMonitor
                 // discarded rather than queued up to fire separately afterwards.
                 tracked.CompletionPending = false;
                 tracked.BackgndSince = null;
+                tracked.LastBackgndReason = BackgndReason.None;
                 return PaneState.Waiting;
 
             default:

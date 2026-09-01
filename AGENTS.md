@@ -22,11 +22,13 @@ monitor, or a detached sub-agent) is the opposite: it *is* a classifier signal, 
 no history. It is quiet - no chime, no pointer cue - and it *defers*
 the finished-turn announcement rather than cancelling it. A pane that goes WORKING→BACKGND
 is marked as having an unannounced completed turn, released as DONE either when the task
-exits (BACKGND→IDLE) or after a grace period (`backgroundGraceSeconds`, default 120) if
-the task outlives it, so a `npm run dev` cannot swallow the chime forever. First sight
-never announces: a pane discovered already in BACKGND completed no turn the watcher saw,
-so neither exit fires - the same rule that keeps a freshly discovered IDLE pane out of
-DONE.
+exits (BACKGND→IDLE) or - **for a background shell or monitor only** - after a grace period
+(`backgroundGraceSeconds`, default 120) if the task outlives it, so a `npm run dev` cannot
+swallow the chime forever. BACKGND carries a *reason* saying which of its two fingerprints
+matched, and that grace release is gated on it; see "The grace period is per-kind" below.
+First sight never announces: a pane discovered already in BACKGND completed no turn the
+watcher saw, so neither exit fires - the same rule that keeps a freshly discovered IDLE
+pane out of DONE.
 
 Background **sub-agents** split across WORKING and BACKGND, and the line between them is
 whether the agent can still take input:
@@ -48,10 +50,31 @@ renders below the footer: a `●` (U+25CF) `main` row that is always present, pl
 (U+25EF) row per live agent, removed when that agent reports. That removal is what makes
 the fingerprint self-releasing - no timer, no history.
 
-The grace period is deliberately *not* per-kind. A sub-agent always terminates, so unlike a
-dev server it cannot swallow the chime forever; it can only outrun the 120s grace and chime
-somewhat early. Splitting the timer would mean BACKGND carrying a reason through the state
-machine, which is a real expansion for a cosmetic gain. Deferred, not foreclosed.
+The grace period **is** per-kind, and the dividing line is a termination guarantee rather
+than a kind of work. A shell or monitor may run forever - a dev server never exits on its
+own - so without a backstop its pane would never chime, which is exactly what
+`backgroundGraceSeconds` is for. A sub-agent always terminates and removes its own row when
+it reports, so the pane releases itself; the timer was never the releasing mechanism for
+that case, and running it anyway announced a turn that had not finished. The parent is
+typically waiting to verify the sub-agent's work, so it is not the user's move at all, and
+because DONE persists across BACKGND the pane then read `✓ DONE` for the whole remainder of
+the run - observed live at 16 minutes, chimed since minute two.
+
+So BACKGND now carries a **reason** (`BackgndReason`, a flags enum: background task,
+background agent, or both) out of the classifier, and the grace release is gated on it being
+*exclusively* a background task. An earlier note called that expansion "a real expansion for
+a cosmetic gain"; the gain was not cosmetic - the wrong half of the state machine was being
+told which way to fail.
+
+Three details keep it honest. The reason is **not** a second `PaneState`: BACKGND keeps one
+badge, one rank and one precedence position, because every consumer but the grace gate is
+indifferent to it. Matching does **not** short-circuit, so a pane carrying a shell *and* an
+agent reports both flags and the shell cannot readmit the backstop. And when the reason
+*narrows* - the agent finishes while its shell keeps running - `BackgndSince` is re-based to
+that moment, because no timer ran while the agent was outstanding and inheriting an
+already-expired window would promote on the very poll where the agent reported. The agent
+case gets **no** timer, not a longer one: if a `◯` row is ever found to outlive its agent,
+that is a fingerprint bug to fix at the classifier, not to paper over with a second timer.
 
 One ceiling worth knowing: the fleet panel costs one line per agent, and the classifier
 scans the last 16 non-blank lines. A live capture put the composer 8 lines from the end

@@ -444,6 +444,17 @@ public class AttentionMonitorTests
     private const string ClaudeWaiting =
         "❯ 1. Yes\n↑/↓ to navigate · enter to select · esc to cancel";
 
+    // A finished turn whose only outstanding work is a detached sub-agent: no counter in
+    // the footer slot (agents are never counted there), one `◯` row in the fleet panel.
+    private const string ClaudeBackgndAgent =
+        "● Earlier output\n────\n❯\n────\n  -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents" +
+        "\n\n  ● main\n  ◯ ticket-107  Build one ticket…   2m 5s · ↓ 104.3k tokens";
+
+    // Both at once: a sub-agent, and a shell of the parent's own.
+    private const string ClaudeBackgndAgentAndShell =
+        "● Earlier output\n────\n❯\n────\n  -- INSERT -- ⏵⏵ auto mode on · 1 shell · ← for agents" +
+        "\n\n  ● main\n  ◯ ticket-107  Build one ticket…   2m 5s · ↓ 104.3k tokens";
+
     private static readonly TimeSpan PastGrace = TimeSpan.FromSeconds(121);
 
     [Fact]
@@ -658,5 +669,218 @@ public class AttentionMonitorTests
         monitor.Tick();
 
         Assert.False(monitor.Acknowledge("%1"));   // not DONE, so nothing to clear
+    }
+
+    // ---- The grace period is gated on the BACKGND reason --------------------
+
+    [Fact]
+    public void Grace_period_never_releases_a_pane_waiting_on_a_subagent()
+    {
+        // The bug this change fixes. A sub-agent always terminates and removes its own
+        // row, so the pane releases itself; running the backstop on it announces a turn
+        // the parent has not finished - it is waiting to verify the sub-agent's work.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgndAgent;
+        monitor.Tick();
+
+        // Many multiples of the grace period: the timer must not merely be longer.
+        for (var i = 0; i < 20; i++)
+        {
+            clock.Advance(PastGrace);
+            var snap = monitor.Tick();
+            Assert.Equal(PaneState.Backgnd, Assert.Single(snap.Panes).State);
+            Assert.Empty(snap.Events);
+        }
+    }
+
+    [Fact]
+    public void A_subagent_finishing_releases_the_held_announcement()
+    {
+        // The release path that replaces the timer: the row leaves the panel, the pane
+        // classifies IDLE, and the chime lands at the moment the sub-agent actually
+        // reported rather than 120 seconds into its run.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgndAgent;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);
+        Assert.Empty(monitor.Tick().Events);   // still nothing, however long it ran
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;      // the agent reported; its row is gone
+        var released = monitor.Tick();
+
+        Assert.Equal(PaneState.Done, Assert.Single(released.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(released.Events).Kind);
+        Assert.Empty(monitor.Tick().Events);   // and only once
+    }
+
+    [Fact]
+    public void A_subagent_finishing_into_a_new_turn_rearms_rather_than_announces()
+    {
+        // The other release path. The parent typically resumes to verify the sub-agent's
+        // work, so it goes BACKGND to WORKING - the held announcement is discarded and the
+        // chime comes from that turn's own completion.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgndAgent;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);
+        fake.Captures["%1"] = ClaudeWorking;   // parent resumed to verify
+        Assert.Empty(monitor.Tick().Events);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;
+        var snap = monitor.Tick();
+        Assert.Equal(PaneState.Done, Assert.Single(snap.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(snap.Events).Kind);
+    }
+
+    [Fact]
+    public void A_shell_alongside_a_subagent_suppresses_the_timer()
+    {
+        // The gate is "exclusively a counter", not "a counter is present". A shell running
+        // beside the sub-agent must not readmit the backstop.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgndAgentAndShell;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);
+        var snap = monitor.Tick();
+        Assert.Equal(PaneState.Backgnd, Assert.Single(snap.Panes).State);
+        Assert.Empty(snap.Events);
+    }
+
+    [Fact]
+    public void Grace_period_restarts_when_a_subagent_finishes_but_a_shell_remains()
+    {
+        // No timer ran while the agent was outstanding, so the shell has never had one.
+        // Inheriting the original BACKGND entry time would promote on the very poll where
+        // the reason narrows - firing the instant the sub-agent reports, with no grace at
+        // all for the shell that is still running.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgndAgentAndShell;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);              // long past grace, but an agent is running
+        Assert.Empty(monitor.Tick().Events);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;   // agent done; only the shell is left
+        var narrowed = monitor.Tick();
+        Assert.Equal(PaneState.Backgnd, Assert.Single(narrowed.Panes).State);
+        Assert.Empty(narrowed.Events);         // not promoted on the narrowing poll
+
+        clock.Advance(PastGrace);              // a full grace period from the narrowing
+        var released = monitor.Tick();
+        Assert.Equal(PaneState.Done, Assert.Single(released.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(released.Events).Kind);
+    }
+
+    [Fact]
+    public void Grace_promotion_is_not_undone_by_a_subagent_starting()
+    {
+        // DONE persists across BACKGND regardless of reason. A sub-agent launched after the
+        // announcement must not pull the pane back to BACKGND and undo it.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeWorking;
+        var monitor = Build(fake, out var clock);
+        monitor.Tick();
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgnd;
+        monitor.Tick();
+
+        clock.Advance(PastGrace);
+        Assert.Equal(PaneState.Done, Assert.Single(monitor.Tick().Panes).State);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeBackgndAgentAndShell;   // a sub-agent starts up
+        var snap = monitor.Tick();
+        Assert.Equal(PaneState.Done, Assert.Single(snap.Panes).State);
+        Assert.Empty(snap.Events);
+    }
+
+    [Fact]
+    public void First_sight_of_a_subagent_pane_still_announces_nothing()
+    {
+        // First sight carries no history, so no exit from BACKGND announces - including the
+        // sub-agent path, which is now the only way such a pane can be released at all.
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = ClaudeBackgndAgent;
+        var monitor = Build(fake, out var clock);
+        Assert.Equal(PaneState.Backgnd, Assert.Single(monitor.Tick().Panes).State);
+
+        clock.Advance(PastGrace);
+        Assert.Empty(monitor.Tick().Events);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = ClaudeIdle;      // the agent finished
+        var snap = monitor.Tick();
+        Assert.Equal(PaneState.Idle, Assert.Single(snap.Panes).State);
+        Assert.Empty(snap.Events);
+    }
+
+    [Fact]
+    public void Real_subagent_capture_shapes_hold_the_chime_then_release_it()
+    {
+        // The sub-agent counterpart to Real_capture_shapes_drive_the_deferred_chime_end_to_end,
+        // on the actual fixture captures rather than the inline screens: the real footer
+        // (carrying no counter, because agents are never counted there) and the real fleet
+        // panel. This is the sequence that misfired - the pane chimed 120s in and then read
+        // DONE for the rest of the sub-agent's run.
+        static string Fixture(string name) =>
+            File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", name));
+
+        var fake = new FakeTmuxClient { ListOutput = ClaudePane };
+        fake.Captures["%1"] = Fixture("claude-working-current.txt");
+        var monitor = Build(fake, out var clock);
+        Assert.Equal(PaneState.Working, Assert.Single(monitor.Tick().Panes).State);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Fixture("claude-backgnd-subagent-real.txt");
+        var held = monitor.Tick();
+        Assert.Equal(PaneState.Backgnd, Assert.Single(held.Panes).State);
+        Assert.Empty(held.Events);
+
+        // Well past the grace period, and repeatedly: the backstop must not apply here.
+        for (var i = 0; i < 5; i++)
+        {
+            clock.Advance(PastGrace);
+            var still = monitor.Tick();
+            Assert.Equal(PaneState.Backgnd, Assert.Single(still.Panes).State);
+            Assert.Empty(still.Events);
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        fake.Captures["%1"] = Fixture("claude-idle-after-subagent.txt");   // the row is gone
+        var released = monitor.Tick();
+        Assert.Equal(PaneState.Done, Assert.Single(released.Panes).State);
+        Assert.Equal(AttentionKind.EnteredDone, Assert.Single(released.Events).Kind);
     }
 }

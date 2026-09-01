@@ -61,11 +61,22 @@ public sealed class PaneClassifier
     /// <summary>
     /// Classify from a capture and the pane's dead flag. The pane is already known
     /// to belong to this profile's agent (matched during discovery).
+    ///
+    /// A one-line delegation to <see cref="Inspect"/>, which is the single implementation.
+    /// Most callers - the `--once` and `--calibrate` paths, and the bulk of the tests -
+    /// want the state alone; only the monitor needs the BACKGND reason. Keeping one
+    /// implementation behind both entry points means there is no second code path to drift.
     /// </summary>
-    public PaneState Classify(string? capture, bool dead)
+    public PaneState Classify(string? capture, bool dead) => Inspect(capture, dead).State;
+
+    /// <summary>
+    /// Classify, keeping the BACKGND reason. See <see cref="Classify"/> for the
+    /// state-only form.
+    /// </summary>
+    public Classification Inspect(string? capture, bool dead)
     {
         if (dead)
-            return PaneState.Dead;
+            return Classification.Of(PaneState.Dead);
 
         var statusLines = TailNonBlank(capture, _statusLineCount);
         var statusText = string.Join("\n", statusLines);
@@ -76,15 +87,18 @@ public sealed class PaneClassifier
         var composer = FindComposerLine(statusLines);
 
         if (IsWaiting(statusLines, statusText, composer))
-            return PaneState.Waiting;
+            return Classification.Of(PaneState.Waiting);
         if (IsWorking(statusText))
-            return PaneState.Working;
-        if (IsBackgnd(statusLines, composer))
-            return PaneState.Backgnd;
-        if (IsIdle(statusText, composer))
-            return PaneState.Idle;
+            return Classification.Of(PaneState.Working);
 
-        return PaneState.Unknown;
+        var backgnd = BackgndReasons(statusLines, composer);
+        if (backgnd != BackgndReason.None)
+            return new Classification(PaneState.Backgnd, backgnd);
+
+        if (IsIdle(statusText, composer))
+            return Classification.Of(PaneState.Idle);
+
+        return Classification.Of(PaneState.Unknown);
     }
 
     /// <summary>
@@ -217,20 +231,34 @@ public sealed class PaneClassifier
     /// outlived one ("· 1 shell still running" frozen after the shell exited, "Running in
     /// the background as @name" frozen after the sub-agent reported). Matching any of them
     /// would pin the pane in BACKGND for good.
+    ///
+    /// Returns which of the two matched rather than a bare bool, because they carry
+    /// different termination guarantees and the monitor's grace-period backstop applies to
+    /// only one of them - see <see cref="BackgndReason"/>. A return of
+    /// <see cref="BackgndReason.None"/> means the pane is not BACKGND.
     /// </summary>
-    private bool IsBackgnd(List<string> statusLines, int composer)
+    private BackgndReason BackgndReasons(List<string> statusLines, int composer)
     {
-        if (composer < 0 || (_backgroundTask is null && _backgroundAgentRow is null))
-            return false;
+        var reasons = BackgndReason.None;
 
+        if (composer < 0 || (_backgroundTask is null && _backgroundAgentRow is null))
+            return reasons;
+
+        // Deliberately does NOT stop at the first match. The two fingerprints are
+        // alternatives, not one refining the other, and a pane can carry both at once - a
+        // detached sub-agent alongside a shell of its own. Short-circuiting would report
+        // whichever happened to be tested first, and the grace-period gate needs to know
+        // that an agent is among them.
         for (var i = composer + 1; i < statusLines.Count; i++)
         {
-            if ((_backgroundTask?.IsMatch(statusLines[i]) ?? false) ||
-                (_backgroundAgentRow?.IsMatch(statusLines[i]) ?? false))
-                return true;
+            var line = statusLines[i];
+            if (_backgroundTask?.IsMatch(line) ?? false)
+                reasons |= BackgndReason.BackgroundTask;
+            if (_backgroundAgentRow?.IsMatch(line) ?? false)
+                reasons |= BackgndReason.BackgroundAgent;
         }
 
-        return false;
+        return reasons;
     }
 
     /// <summary>

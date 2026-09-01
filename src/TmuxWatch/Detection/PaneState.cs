@@ -20,6 +20,13 @@ public enum PaneState
     /// Unlike <see cref="Done"/>, this IS produced by the stateless classifier: "not
     /// blocked, not working, background task alive" is fully visible on one screen and
     /// needs no history.
+    ///
+    /// The classifier reports a <see cref="BackgndReason"/> alongside this state, saying
+    /// which fingerprint matched - a background-task counter, a detached sub-agent's row,
+    /// or both. It exists solely so the monitor's grace-period backstop can apply to work
+    /// that may never end while leaving a sub-agent, which always terminates and releases
+    /// the pane itself, to do so. The reason changes nothing else: badge, priority rank and
+    /// classification precedence are the same whatever it says.
     /// </summary>
     Backgnd,
 
