@@ -27,6 +27,8 @@ public sealed class PaneClassifier
     private readonly AgentProfile _profile;
     private readonly int _statusLineCount;
     private readonly Regex _waitingCursor;
+    private readonly Regex? _waitingChrome;
+    private readonly Regex? _workingLine;
     private readonly Regex? _workingSpinner;
     private readonly Regex _spinnerGlyph;
     private readonly Regex _workingLineStartGlyph;
@@ -47,6 +49,8 @@ public sealed class PaneClassifier
         _profile = profile;
         _statusLineCount = statusLineCount;
         _waitingCursor = profile.CompileWaitingCursor();
+        _waitingChrome = profile.CompileWaitingChrome();
+        _workingLine = profile.CompileWorkingLine();
         _workingSpinner = profile.CompileWorkingSpinner();
         _spinnerGlyph = profile.CompileSpinnerGlyph();
         _workingLineStartGlyph = profile.CompileWorkingLineStartGlyph();
@@ -123,7 +127,8 @@ public sealed class PaneClassifier
     {
         for (var i = composer + 1; i < statusLines.Count; i++)
         {
-            if (_waitingCursor.IsMatch(statusLines[i]))
+            if (_waitingCursor.IsMatch(statusLines[i]) ||
+                (_waitingChrome?.IsMatch(statusLines[i]) ?? false))
                 return true;
         }
 
@@ -161,6 +166,9 @@ public sealed class PaneClassifier
 
         foreach (var line in statusText.Split('\n'))
         {
+            if (_workingLine?.IsMatch(line) ?? false)
+                return true;
+
             // Footer shows the working cancel marker. Copilot pairs it with a spinner
             // glyph on the same line; an older Claude build's marker ("esc to
             // interrupt") was distinctive enough to stand alone (WorkingMarkerSufficient).

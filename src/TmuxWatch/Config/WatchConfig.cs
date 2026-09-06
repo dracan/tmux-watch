@@ -4,7 +4,7 @@ namespace TmuxWatch.Config;
 
 /// <summary>
 /// Global watcher behaviour plus the set of <see cref="AgentProfile"/>s to watch.
-/// When <see cref="Agents"/> is unset the built-in Copilot and Claude Code profiles
+/// When <see cref="Agents"/> is unset the built-in Copilot, Claude Code, and Codex profiles
 /// are used; supply <see cref="Agents"/> in config to override or extend them.
 /// </summary>
 public sealed class WatchConfig
@@ -91,8 +91,8 @@ public sealed class WatchConfig
     public PointerSignalConfig PointerSignal { get; set; } = new();
 
     /// <summary>
-    /// Agent profiles to watch. When null or empty, the built-in Copilot + Claude
-    /// Code defaults are used.
+    /// Agent profiles to watch. When null or empty, the built-in Copilot, Claude
+    /// Code, and Codex defaults are used.
     /// </summary>
     public List<AgentProfile>? Agents { get; set; }
 
@@ -103,6 +103,29 @@ public sealed class WatchConfig
     {
         CopilotProfile(),
         ClaudeProfile(),
+        CodexProfile(),
+    };
+
+    /// <summary>
+    /// Codex CLI core states. Discovery, composer, and working status verified on
+    /// 0.153.4; approval/question shapes checked against upstream renderer snapshots
+    /// (see fixtures/codex-provenance.md). Question editors share the composer caret
+    /// and can also say "esc to interrupt", so their submit footer takes precedence
+    /// and WORKING requires a complete timed status line. No BACKGND inference.
+    /// </summary>
+    public static AgentProfile CodexProfile() => new()
+    {
+        Id = "codex",
+        Command = "codex",
+        WaitingCursorPattern = @"^\s*\u203A\s*\d+\.",
+        WaitingFooterNavMarker = "",
+        WaitingFooterCancelMarker = "",
+        WaitingChromePattern = @"^\s*(?:Press enter to confirm or esc to (?:cancel|go back)|(?:[^|\r\n]+\|\s*)*enter to submit (?:answer|all)(?:\s*\|[^\r\n]*)?)\s*$",
+        WorkingSpinnerGlyphs = "",
+        WorkingWord = "",
+        WorkingFooterCancelMarker = "",
+        WorkingLinePattern = @"^\s*[\u2022\u25E6]\s+[^()\r\n]+\(\d+[smh](?:\s+\d+[smh])*\s+\u2022\s+esc to interrupt\)\s*$",
+        IdlePromptPattern = @"^\s*\u203A(?!\s*\d+\.)",
     };
 
     /// <summary>Built-in Copilot CLI profile (tokens verified against Copilot v1.0.63).</summary>

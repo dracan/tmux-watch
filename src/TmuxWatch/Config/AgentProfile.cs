@@ -5,7 +5,7 @@ namespace TmuxWatch.Config;
 /// <summary>
 /// A watched coding-agent CLI: how to recognise its panes (foreground command and
 /// an optional session-name backstop) plus the version-specific status-bar tokens
-/// used to classify them. Built-in profiles exist for Copilot and Claude Code; the
+/// used to classify them. Built-in profiles exist for Copilot, Claude Code, and Codex; the
 /// set is overridable via configuration so supporting a new agent is a config
 /// change, not a code change.
 /// </summary>
@@ -32,6 +32,22 @@ public sealed class AgentProfile
 
     /// <summary>Cancel text common to a selection footer.</summary>
     public string WaitingFooterCancelMarker { get; set; } = "esc to cancel";
+
+    /// <summary>
+    /// Optional regex for a blocking footer below the last composer, or anywhere in
+    /// the scanned tail when no composer is present. Unlike the legacy footer pair,
+    /// this excludes old transcript hints. Covers question editors that use the same
+    /// caret as the composer and therefore hide their selection cursor above it.
+    /// Empty disables this check.
+    /// </summary>
+    public string WaitingChromePattern { get; set; } = "";
+
+    /// <summary>
+    /// Optional regex for a complete live status line in the scanned tail. Use anchors
+    /// and live qualifiers to exclude ordinary prose and frozen completion banners.
+    /// Empty disables this check.
+    /// </summary>
+    public string WorkingLinePattern { get; set; } = "";
 
     /// <summary>Spinner glyphs shown while the agent is working.</summary>
     public string WorkingSpinnerGlyphs { get; set; } = "◎◉●○";
@@ -142,6 +158,10 @@ public sealed class AgentProfile
     // ---- Compiled helpers ---------------------------------------------------
 
     public Regex CompileWaitingCursor() => new(WaitingCursorPattern, RegexOptions.Compiled);
+
+    public Regex? CompileWaitingChrome() => CompileOrNull(WaitingChromePattern);
+
+    public Regex? CompileWorkingLine() => CompileOrNull(WorkingLinePattern);
 
     /// <summary>Spinner-glyph-immediately-before-the-working-word, or null when no word is configured.</summary>
     public Regex? CompileWorkingSpinner() =>

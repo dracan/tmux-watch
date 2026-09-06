@@ -1,0 +1,9 @@
+• Finished checking the sample project.
+  A background agent completed its task.
+  A background shell can keep running after a foreground turn.
+
+─ Worked for 1m 49s ────────
+
+› Add a test for the sample
+
+  model default · ~/code/example

@@ -1,0 +1,14 @@
+› Previous submitted prompt
+  The earlier dialog looked like this:
+  › 1. Yes, proceed (y)
+    2. No, and tell Codex what to do differently (esc)
+  Press enter to confirm or esc to cancel
+  Question 1/1 (1 unanswered)
+  › Type your answer (optional)
+  enter to submit answer | esc to interrupt
+
+• The requested change is complete.
+
+› Ask Codex to do anything
+
+  model default · ~/code/example

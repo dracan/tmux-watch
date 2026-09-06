@@ -1,0 +1,8 @@
+  Question 1/2 (2 unanswered)
+  Which output format?
+
+    1. Text  Plain text output.
+  › 2. JSON  Structured output.
+
+  tab to add notes | enter to submit answer
+  ←/→ to navigate questions | esc to interrupt

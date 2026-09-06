@@ -1,0 +1,9 @@
+• Read the example source file.
+
+◦ Running a check
+
+◦ Working (1m 17s • esc to interrupt)
+
+› Ask Codex to do anything
+
+  model default · ~/code/example

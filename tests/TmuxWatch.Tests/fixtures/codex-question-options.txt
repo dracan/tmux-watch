@@ -1,0 +1,7 @@
+  Question 1/1 (1 unanswered)
+  Which output format?
+
+  › 1. Text  Plain text output.
+    2. JSON  Structured output.
+
+  tab to add notes | enter to submit answer | esc to interrupt

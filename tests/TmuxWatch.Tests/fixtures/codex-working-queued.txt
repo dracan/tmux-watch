@@ -1,0 +1,10 @@
+• Analyzing (0s • esc to interrupt)
+  └ Reading a sample file
+    Checking its imports
+
+• Queued follow-up inputs
+  ↳ Also check the example tests
+
+› Ask Codex to do anything
+
+  ? for shortcuts                 100% context left

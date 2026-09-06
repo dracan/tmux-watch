@@ -1,7 +1,7 @@
 # tmux-watch
 
-A watcher that tells you which **coding-agent** sessions - **GitHub Copilot CLI**
-and **Claude Code** - running inside **tmux** panes need your attention, and lets
+A watcher that tells you which **coding-agent** sessions - **GitHub Copilot CLI**,
+**Claude Code**, and **Codex CLI** - running inside **tmux** panes need your attention, and lets
 you jump straight to them. It never types into a pane; watching is entirely
 read-only.
 
@@ -11,7 +11,7 @@ prompt or a question). `tmux-watch` polls the panes read-only, classifies each
 one against its agent's profile, and surfaces the ones that need you.
 
 Agents are pluggable **profiles** (how to recognise the agent's panes and the
-status-bar tokens that mark each state). Copilot and Claude Code ship built in;
+status-bar tokens that mark each state). Copilot, Claude Code, and Codex ship built in;
 a new agent is a config change, not a code change.
 
 ## How it works
@@ -20,7 +20,7 @@ Each poll:
 
 1. Enumerates panes once via `tmux lsp -a -F …` (read-only).
 2. Matches each pane to an agent profile by foreground command
-   (`copilot` / `claude`), with an optional session-name backstop.
+   (`copilot` / `claude` / `codex`), with an optional session-name backstop.
 3. Captures each matched pane with `capture-pane -p` (read-only) and classifies it
    from its status bar using that agent's tokens (Copilot shown below; Claude Code
    uses its own - numbered `❯ N.` permission cursor, a live status line while working
@@ -81,6 +81,28 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 - **Copilot CLI** - detection tokens were verified against `v1.0.63`. The status-bar
   wording is version-specific; if a future Copilot version changes it, run
   `--calibrate` and override the tokens in a config file (see below).
+
+### Codex CLI
+
+Codex panes are discovered automatically from `codex` or `codex.exe`. The profile
+recognizes approval menus and question editors as WAITING, timed live status lines
+as WORKING, and the input composer as IDLE. The existing monitor promotes an
+observed WORKING-to-IDLE transition to DONE and supports the same chime,
+acknowledgement, and jump actions as the other agents.
+
+Free-text questions and notes editors share the normal composer caret, and their
+footer can also say `esc to interrupt`. Codex detection therefore checks the
+submit-answer or submit-all footer before looking for a complete timed working
+line. Old question footers above the last composer are ignored.
+
+Discovery, IDLE, and WORKING were checked on Codex CLI **0.153.4**. Approval and
+question fixtures use pinned upstream renderer snapshots; see
+[fixture provenance](tests/TmuxWatch.Tests/fixtures/codex-provenance.md).
+Custom keybindings or later UI changes may require profile overrides.
+
+Codex BACKGND detection is outside this version's scope. Its DONE badge means the
+observed foreground turn returned to the composer; it does not track completion
+of detached agents or background tasks.
 
 ## Usage
 
@@ -169,7 +191,8 @@ with an agent - appear in that table.
 
 Behaviour and all per-agent detection tokens are configurable, so an agent
 version bump is a config change, not a code change. When no `agents` list is
-given, the built-in `copilot` and `claude` profiles are used. Pass
+given, the built-in `copilot`, `claude`, and `codex` profiles are used. A non-empty
+`agents` list replaces those defaults, so include every agent you want to watch. Pass
 `--config config.json` to override:
 
 ```json
@@ -177,7 +200,7 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
   "tmuxExecutable": "tmux",
   "pollIntervalSeconds": 2.0,
   "notificationChannel": "bell",
-  "statusLineCount": 6,
+  "statusLineCount": 16,
   "backgroundGraceSeconds": 120.0,
   "ackHoldSeconds": 5.0,
   "pointerSignal": {
@@ -211,6 +234,19 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
       "idlePromptPattern": "^\\s*❯(?!\\s*\\d+\\.)",
       "backgroundTaskPattern": "·\\s*\\d+\\s+(shells?|monitors?)\\s*(·|$)",
       "idleHints": []
+    },
+    {
+      "id": "codex",
+      "command": "codex",
+      "waitingCursorPattern": "^\\s*\\u203A\\s*\\d+\\.",
+      "waitingFooterNavMarker": "",
+      "waitingFooterCancelMarker": "",
+      "waitingChromePattern": "^\\s*(?:Press enter to confirm or esc to (?:cancel|go back)|(?:[^|\\r\\n]+\\|\\s*)*enter to submit (?:answer|all)(?:\\s*\\|[^\\r\\n]*)?)\\s*$",
+      "workingSpinnerGlyphs": "",
+      "workingWord": "",
+      "workingFooterCancelMarker": "",
+      "workingLinePattern": "^\\s*[\\u2022\\u25E6]\\s+[^()\\r\\n]+\\(\\d+[smh](?:\\s+\\d+[smh])*\\s+\\u2022\\s+esc to interrupt\\)\\s*$",
+      "idlePromptPattern": "^\\s*\\u203A(?!\\s*\\d+\\.)"
     }
   ]
 }
@@ -219,6 +255,12 @@ given, the built-in `copilot` and `claude` profiles are used. Pass
 `idlePromptPattern` is the composer anchor: when set it supersedes `idleHints` for that
 profile, and it also splits the screen for `backgroundTaskPattern`, which is matched only
 *below* the composer line. Copilot leaves both empty and keeps using `idleHints`.
+
+`waitingChromePattern` is an optional blocking-footer regex searched below the
+last composer, or throughout the scanned tail when no composer is present.
+`workingLinePattern` is an optional regex matched against individual lines in
+that tail. Both default to disabled; Codex uses them to distinguish question
+editors from live timed work. The `\u203A` regex escape identifies Codex's caret.
 
 Set `tmuxExecutable` to `psmux` (or another tmux-compatible CLI) to run against a
 different multiplexer host.
