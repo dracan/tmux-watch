@@ -106,6 +106,13 @@ of detached agents or background tasks.
 
 ## Usage
 
+When a table contains multiple coding-agent types, its Window cells show **CC**
+(Claude Code), **GHCP** (GitHub Copilot), or **CDX** (Codex) before the window name.
+Custom agents use their configured profile id. A table containing just one agent
+type shows no prefixes. The main and Paused tables decide independently; non-agent
+panes neither count toward the decision nor receive a prefix. Prefixed window names
+stay on one line and may be truncated in a narrow split.
+
 ```sh
 # Live TUI: watch all agent panes, sorted with WAITING at the top.
 ./go.sh

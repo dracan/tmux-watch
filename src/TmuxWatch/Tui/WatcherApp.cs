@@ -1047,7 +1047,7 @@ public sealed class WatcherApp
     private static string CaretTail(LineEditor editor) =>
         editor.After.Length > 1 ? editor.After[1..] : "";
 
-    private static Table BuildRowTable(
+    internal static Table BuildRowTable(
         string title,
         IReadOnlyList<WatchRow> rows,
         IReadOnlyDictionary<string, int> number,
@@ -1078,6 +1078,9 @@ public sealed class WatcherApp
         }
         table.AddColumn("In state");
 
+        var showAgentLabels = rows.Where(row => row.IsAgent)
+            .Select(row => row.Pane.AgentId).Distinct(StringComparer.Ordinal).Take(2).Count() > 1;
+
         foreach (var row in rows)
         {
             var pane = row.Pane;
@@ -1086,6 +1089,17 @@ public sealed class WatcherApp
             var windowCell = focused
                 ? $"[bold underline]{Markup.Escape(window)}[/]"
                 : Markup.Escape(window);
+            if (showAgentLabels && row.IsAgent)
+            {
+                var label = pane.AgentId switch
+                {
+                    "claude" => "CC",
+                    "copilot" => "GHCP",
+                    "codex" => "CDX",
+                    _ => pane.AgentId,
+                };
+                windowCell = $"[grey]{Markup.Escape(label)}[/] {windowCell}";
+            }
 
             var address = number.TryGetValue(pane.Id, out var index) ? AddressKey(index) : "";
             var addressCell = address.Length == 0 ? "·" : address;
@@ -1132,7 +1146,12 @@ public sealed class WatcherApp
                     ? $"[grey]{FormatDuration(idleFor)}[/]"
                     : "[grey]—[/]");
 
-            table.AddRow(cells.ToArray());
+            var renderedCells = cells.Select(cell => (IRenderable)new Markup(cell)).ToArray();
+            // Labels spend horizontal space, not an extra line per row in a thin split.
+            // Keep normal column measurement so Window cannot crowd out State and age.
+            if (showAgentLabels)
+                renderedCells[2] = new SingleLineCell(renderedCells[2]);
+            table.AddRow(renderedCells);
         }
 
         return table;
