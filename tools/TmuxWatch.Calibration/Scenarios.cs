@@ -4,6 +4,19 @@ namespace TmuxWatch.Calibration;
 
 public sealed record Scenario(string Id, PaneState Target, string Instruction, BackgndReason Reason = BackgndReason.None)
 {
+    public string? CheckExclusion(string agent) => Id switch
+    {
+        "background-monitor" when agent != "claude" => "No native Monitor tool exposed by this adapter; a shell is not monitor coverage",
+        "background-agent" or "background-both" when agent != "claude" => "Detached-agent UI/evidence does not yet support independent background classification",
+        _ => null,
+    };
+
+    public Scenario ForAgent(string agent) => agent == "copilot" && Id == "background-shell"
+        ? this with { Target = PaneState.Working, Reason = BackgndReason.None } : this;
+
+    public bool Supported(string agent) => Target != PaneState.Backgnd || agent == "claude" ||
+        (agent == "codex" && Id == "background-shell");
+
     public bool TargetEstablished(IReadOnlyList<EvidenceEvent> events, bool freeformEditor)
     {
         if (Id == "background-monitor")
@@ -31,8 +44,12 @@ public sealed record Scenario(string Id, PaneState Target, string Instruction, B
             "The repo-owned calibration-helper.py is already present and needs only Python's standard library. " +
             "Use each given helper command verbatim, without shell wrappers, extra commands, or an appended exit-code echo; tell any subagent the same. " +
             Instruction.Replace("QUESTION_TOOL", question) +
+            (agent == "codex" && Id.StartsWith("question-")
+                ? " Use only synchronous request_user_input, not request_user_input_async. Supply two options for every question (Amber and Blue for color, Default and Custom for label). The harness will use the native notes editor when testing free text." : "") +
             (Id.StartsWith("question-") ? " The requested operation is only asking and receiving these answers. Do not inspect or execute the helper for this scenario." : "") +
-            " After the requested operation completes, finish your turn with a short confirmation.";
+            (Target == PaneState.Backgnd
+                ? " After launching the requested background work, finish your turn immediately. Do not wait for the gate or subagent to complete."
+                : " After the requested operation completes, finish your turn with a short confirmation.");
     }
 
     public static readonly Scenario[] All =
@@ -46,7 +63,7 @@ public sealed record Scenario(string Id, PaneState Target, string Instruction, B
         new("question-multiple", PaneState.Waiting, "Use QUESTION_TOOL now with two questions in one call: a choice of Amber or Blue, and a free-text project label. Wait for both answers."),
         new("background-shell", PaneState.Backgnd, "Run `python3 calibration-helper.py gate shell 120` using your native background-shell option, and return your turn immediately while it runs.", BackgndReason.BackgroundTask),
         new("background-monitor", PaneState.Backgnd, "Use your native background monitor tool to monitor `python3 calibration-helper.py gate monitor 120`, and return your turn while the monitor remains active.", BackgndReason.BackgroundTask),
-        new("background-agent", PaneState.Backgnd, "Launch one native background subagent whose task is to run `python3 calibration-helper.py gate agent 120` and wait for it to finish. Detach the subagent and return your own turn immediately.", BackgndReason.BackgroundAgent),
+        new("background-agent", PaneState.Backgnd, "Launch one native background subagent (set run_in_background=true when available) whose task is to run `python3 calibration-helper.py gate agent 120` and wait for it to finish. Detach the subagent and return your own turn immediately.", BackgndReason.BackgroundAgent),
         new("blocked-agent", PaneState.Working, "Launch a subagent to run `python3 calibration-helper.py gate agent 120`. Keep your own turn blocked waiting for that subagent to complete.", BackgndReason.None),
         new("background-both", PaneState.Backgnd, "Start `python3 calibration-helper.py gate shell 120` as a native background shell, AND detach a native background subagent running `python3 calibration-helper.py gate agent 120`. Return your turn while both run.", BackgndReason.BackgroundTask | BackgndReason.BackgroundAgent),
         new("dead", PaneState.Dead, "Reply with exactly READY, without using tools."),

@@ -26,7 +26,7 @@ try
     }
     switch (options.Command)
     {
-        case "run": return await new LiveRun(options).Run(cancel.Token);
+        case "check": case "run": return await new LiveRun(options).Run(cancel.Token);
         case "preflight":
             var available = true;
             foreach (var agent in options.Agents)
@@ -55,8 +55,9 @@ try
         case "help": case "--help": case "-h":
             Console.WriteLine("""
                 Usage: ./calibrate.sh COMMAND [OPTIONS]
-                Commands: preflight, list, run, replay, confirm, export
-                run launches real agents and consumes model usage. No agents run by default.
+                Commands: preflight, list, check, run, replay, confirm, export
+                check exercises the supported automated subset and lists exclusions.
+                check and run launch real agents and consume model usage. No agents run by default.
                   --agents copilot,claude,codex     Select installed agents
                   --scenarios idle,working,...     Default: every scenario (see list)
                   --widths 120,70 --height 40      Test layouts

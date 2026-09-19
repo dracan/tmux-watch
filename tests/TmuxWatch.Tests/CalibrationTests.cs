@@ -12,6 +12,104 @@ public sealed class CalibrationTests
         new() { Event = name, At = Start.AddSeconds(second), Tool = tool, Gate = gate, Background = background, Child = child, Name = gateName };
 
     [Fact]
+    public void Child_session_stop_cannot_finish_parent_turn()
+    {
+        var events = new[] {
+            Event("SessionStart", 0) with { Session = "parent" },
+            Event("UserPromptSubmit", 1) with { Session = "parent" },
+            Event("Stop", 2) with { Session = "child" },
+        };
+        Assert.Null(Evidence.Establish(Scenario("idle"), events, false, Start.AddSeconds(4)));
+    }
+
+    [Fact]
+    public void Foreground_parent_task_result_joins_child_without_child_hook_ids()
+    {
+        var events = new[] {
+            Event("PreToolUse", 1, "task") with { Call = "task" }, Event("GateStart", 2, gateName: "agent"),
+            Event("GateEnd", 3, gateName: "agent"), Event("PostToolUse", 4, "task") with { Call = "task" }, Event("Stop", 5),
+        };
+        Assert.Equal(PaneState.Idle, Evidence.Establish(Scenario("blocked-agent"), events, false, Start.AddSeconds(6))!.State);
+        Assert.Null(Evidence.Establish(Scenario("blocked-agent"), events.Where(e => e.Event != "PostToolUse").ToArray(), false, Start.AddSeconds(6)));
+    }
+
+    [Fact]
+    public void Copilot_native_async_shell_remains_working_after_model_stop_until_gate_exits()
+    {
+        var scenario = Scenario("background-shell").ForAgent("copilot");
+        var events = new[] { Event("PreToolUse", 1, "bash", gate: true, background: true),
+            Event("GateStart", 2, gateName: "shell"), Event("Stop", 3) };
+        Assert.Equal(PaneState.Working, Evidence.Establish(scenario, events, false, Start.AddSeconds(5))!.State);
+        Assert.Null(Evidence.Establish(scenario, events.Skip(1).ToArray(), false, Start.AddSeconds(5)));
+        Assert.Equal(PaneState.Idle, Evidence.Establish(scenario,
+            events.Append(Event("GateEnd", 6, gateName: "shell")).ToArray(), false, Start.AddSeconds(8))!.State);
+    }
+
+    [Fact]
+    public void Native_async_agent_result_establishes_background_and_requires_its_own_child_completion()
+    {
+        var events = new[] {
+            Event("PreToolUse", 1, "Agent"), Event("PostToolUse", 2, "Agent", background: true),
+            Event("PreToolUse", 3, "Bash", gate: true, child: "worker"),
+            Event("GateStart", 4, gateName: "agent"), Event("Stop", 5),
+        };
+        Assert.Equal(PaneState.Backgnd, Evidence.Establish(Scenario("background-agent"), events, false, Start.AddSeconds(7))!.State);
+        Assert.Null(Evidence.Establish(Scenario("background-agent"), events.Select(e => e with { Background = false }).ToArray(), false, Start.AddSeconds(7)));
+        var ended = events.Append(Event("GateEnd", 8, gateName: "agent")).ToArray();
+        Assert.Null(Evidence.Establish(Scenario("background-agent"), ended.Append(Event("SubagentStop", 9, child: "unrelated")).ToArray(), false, Start.AddSeconds(11)));
+        Assert.Equal(PaneState.Idle, Evidence.Establish(Scenario("background-agent"), ended.Append(Event("SubagentStop", 9, child: "worker")).ToArray(), false, Start.AddSeconds(11))!.State);
+    }
+
+    [Fact]
+    public void Question_receipt_requires_matching_native_answer_and_only_labels_its_interval()
+    {
+        var question = Event("PreToolUse", 1, "request_user_input") with { Call = "question" };
+        List<Sample> samples = Enumerable.Range(0, 8).Select(i => new Sample(Start.AddSeconds(i), "capture", PaneState.Unknown,
+            BackgndReason.None, null, PaneState.Unknown, [], "Normal")).ToList();
+        var receipt = Event("PostToolUse", 7, "request_user_input") with { Call = "question", AnswerReceived = true };
+        Assert.True(QuestionReceipt.IsPending(question, [question]));
+        Assert.False(QuestionReceipt.IsPending(question, [question, Event("PreToolUse", 2, "other")]));
+        Assert.False(QuestionReceipt.IsPending(question, [question, receipt]));
+        Assert.False(QuestionReceipt.Establish(samples, question, Start.AddSeconds(2), Start.AddSeconds(6), [receipt with { Call = "other" }]));
+        Assert.False(QuestionReceipt.Establish(samples, question, Start.AddSeconds(2), Start.AddSeconds(6), [receipt with { AnswerReceived = false }]));
+        Assert.False(QuestionReceipt.Establish(samples, question, Start.AddSeconds(2), Start.AddSeconds(6), [Event("Stop", 3), receipt]));
+        Assert.False(QuestionReceipt.Establish(samples, question, Start.AddSeconds(2), Start.AddSeconds(6), [Event("PreToolUse", 3, "other"), receipt]));
+        Assert.True(QuestionReceipt.Establish(samples, question, Start.AddSeconds(2), Start.AddSeconds(6), [receipt]));
+        Assert.Null(samples[0].Expected);
+        Assert.Equal(PaneState.Waiting, samples[3].Expected!.State);
+        Assert.Null(samples[7].Expected);
+    }
+
+    [Fact]
+    public void Check_scope_exclusions_are_explicit_and_full_run_still_reports_unsupported()
+    {
+        Assert.NotNull(Scenario("background-monitor").CheckExclusion("copilot"));
+        Assert.Null(Scenario("background-monitor").CheckExclusion("claude"));
+        Assert.Null(Scenario("background-shell").CheckExclusion("codex"));
+        Assert.True(Scenario("background-shell").Supported("codex"));
+        Assert.Equal(PaneState.Working, Scenario("background-shell").ForAgent("copilot").Target);
+        Assert.Equal(2, Evaluation.ExitCode([new("invisible", Outcome.Unsupported, "No live indicator")]));
+    }
+
+    [Fact]
+    public void Upcoming_login_expiry_is_not_a_login_screen_but_actual_login_still_is()
+    {
+        Assert.False(LiveRun.LooksLikeLogin("Your login expires in 2 days - run /login to renew"));
+        Assert.True(LiveRun.LooksLikeLogin("Please run /login"));
+        Assert.True(LiveRun.LooksLikeLogin("Your login expires in 2 days - run /login to renew\nSign in to continue"));
+        Assert.True(LiveRun.LooksLikeLogin("Enter device code"));
+    }
+
+    [Fact]
+    public void Excluding_every_requested_live_check_cannot_produce_success()
+    {
+        var report = new Report { Root = "/unused", Finished = Start };
+        report.Replay.Add(new("replay", Outcome.Pass, ""));
+        report.Exclusions.Add(new("native-monitor", Outcome.Unsupported, "Unavailable tool"));
+        Assert.Equal(2, report.ExitCode);
+    }
+
+    [Fact]
     public void Helper_running_without_foreground_evidence_is_inconclusive()
     {
         var events = new[] { Event("GateStart", 1, gateName: "foreground") };
@@ -243,6 +341,21 @@ public sealed class CalibrationTests
             var shape = Evidence.Read(root).Last();
             Assert.Equal(2, shape.QuestionCount);
             Assert.Equal(new[] { 2, 0 }, shape.OptionCounts);
+            Assert.DoesNotContain("private-", string.Join("\n", Directory.GetFiles(Path.Combine(root, "evidence")).Select(File.ReadAllText)));
+            File.WriteAllText(input, JsonSerializer.Serialize(new { tool_name = "request_user_input", tool_use_id = "private-call",
+                session_id = "private-session", tool_response = new { answers = new { color = new { answers = new[] { "Default (Recommended)", "user_note: synthetic" } } } } }));
+            var answered = await Processes.Run("bash", ["-c", $"python3 {Processes.Quote(helper)} hook PostToolUse question-choice codex < {Processes.Quote(input)}"]);
+            Assert.True(answered.Ok, answered.Error);
+            var receipt = Evidence.Read(root).Last();
+            Assert.True(receipt.AnswerReceived);
+            Assert.NotEqual("private-call", receipt.Call);
+            Assert.NotEqual("private-session", receipt.Session);
+            File.WriteAllText(input, JsonSerializer.Serialize(new { tool_name = "Agent", tool_response = new {
+                isAsync = true, status = "async_launched", agentId = "private-child", prompt = "private-prompt"
+            } }));
+            var launched = await Processes.Run("bash", ["-c", $"python3 {Processes.Quote(helper)} hook PostToolUse background-agent claude < {Processes.Quote(input)}"]);
+            Assert.True(launched.Ok, launched.Error);
+            Assert.True(Evidence.Read(root).Last().Background);
             Assert.DoesNotContain("private-", string.Join("\n", Directory.GetFiles(Path.Combine(root, "evidence")).Select(File.ReadAllText)));
             await Processes.Run("python3", [helper, "gate", "bounded", "1"]);
             var events = Evidence.Read(root);

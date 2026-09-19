@@ -11,6 +11,8 @@ public sealed record EvidenceEvent
     public bool Gate { get; init; }
     public bool Background { get; init; }
     public string Child { get; init; } = "";
+    public string Session { get; init; } = "";
+    public bool AnswerReceived { get; init; }
     public string Call { get; init; } = "";
     public string Name { get; init; } = "";
     public string Model { get; init; } = "";
@@ -39,7 +41,9 @@ public static class Evidence
             (last is null || last.At <= confirmation.At))
             return new(confirmation.State, confirmation.Reason, confirmation.At, "operator: " + confirmation.Note);
 
-        var main = events.Where(e => e.Child.Length == 0).ToList();
+        var rootSession = events.FirstOrDefault(e => e.Event == "SessionStart" && e.Child.Length == 0)?.Session ?? "";
+        var main = events.Where(e => e.Child.Length == 0 &&
+            (rootSession.Length == 0 || e.Session.Length == 0 || e.Session == rootSession)).ToList();
         var stop = main.LastOrDefault(e => e.Event == "Stop");
         var start = main.LastOrDefault(e => e.Event == "UserPromptSubmit");
         if (stop is not null && start is not null && start.At > stop.At) stop = null;
@@ -59,7 +63,8 @@ public static class Evidence
             return new(PaneState.Waiting, BackgndReason.None, permission.At, "native permission request pending");
 
         // PreToolUse alone does not establish that a native question rendered.
-        // Those paths need a permission event or a time-scoped operator label.
+        // Those paths need a permission event, a later verified answer receipt,
+        // or a time-scoped operator label.
         var question = main.LastOrDefault(e => e.Event == "PreToolUse" && IsQuestion(e.Tool));
         if (question is not null && !main.Any(e => e.At > question.At && e.Event is "PostToolUse" or "Stop")) return null;
 
@@ -73,7 +78,17 @@ public static class Evidence
                 var agentGate = events.LastOrDefault(e => e.Event == "GateStart" && e.Name == "agent");
                 var agentCall = agentGate is null ? null : events.LastOrDefault(e => e.Event == "PreToolUse" && e.Gate && e.Child.Length > 0 && e.At <= agentGate.At);
                 var agentStop = agentCall is null ? null : events.LastOrDefault(e => e.Event == "SubagentStop" && e.Child == agentCall.Child);
-                if (agentGate is not null && (agentStop is null || agentStop.At < agentGate.At)) return null;
+                if (agentGate is not null && (agentStop is null || agentStop.At < agentGate.At))
+                {
+                    // A completed foreground parent task is a native join even when
+                    // child hook IDs are missing. A child shell result is not that join.
+                    var parentTask = main.LastOrDefault(e => e.Event == "PreToolUse" && !e.Background &&
+                        e.Tool is "Agent" or "Task" or "task" && e.At <= agentGate.At);
+                    var joined = parentTask is null ? null : main.LastOrDefault(e => e.Event == "PostToolUse" &&
+                        e.Tool == parentTask.Tool && (parentTask.Call.Length == 0 || e.Call == parentTask.Call) &&
+                        e.At > agentGate.At && e.At >= (lastGateEnd?.At ?? agentGate.At));
+                    if (joined is null || stop.At < joined.At) return null;
+                }
                 var since = new[] { stop.At, lastGateEnd?.At ?? stop.At, agentStop?.At ?? stop.At }.Max();
                 return new(PaneState.Idle, BackgndReason.None, since, "main turn stopped; controlled resources and subagents completed");
             }
@@ -82,7 +97,10 @@ public static class Evidence
                 // gate still alive establishes a detached shell even on Codex,
                 // whose shell hook lacks a background flag.
                 (scenario.Reason.HasFlag(BackgndReason.BackgroundTask) && main.Any(e => e.Event == "PreToolUse" && e.Gate));
-            var nativeAgent = main.Any(e => e.Event == "PreToolUse" && e.Background &&
+            if (scenario.Id == "background-shell" && scenario.Target == PaneState.Working && nativeTask)
+                return new(PaneState.Working, BackgndReason.None, gates.Max(e => e.At),
+                    "runtime waits for its native async shells; controlled gate remains live");
+            var nativeAgent = main.Any(e => e.Event is "PreToolUse" or "PostToolUse" && e.Background &&
                 e.Tool is "Agent" or "Task" or "task" or "collaborationspawn_agent");
             var requestedKindsEstablished = (!scenario.Reason.HasFlag(BackgndReason.BackgroundTask) || nativeTask) &&
                 (!scenario.Reason.HasFlag(BackgndReason.BackgroundAgent) || nativeAgent);

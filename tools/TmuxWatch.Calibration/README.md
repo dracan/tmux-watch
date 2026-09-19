@@ -13,21 +13,27 @@ From the repo root:
 ```sh
 ./calibrate.sh preflight
 ./calibrate.sh list
-./calibrate.sh run
+./calibrate.sh check --unattended
 ```
 
-The default run selects all three agents, every scenario, 120- and 70-column
+The default check selects all three agents and the supported scenarios at 120- and 70-column
 terminals, and one retry. It runs agents sequentially. Each attempt has a
 90-second deadline; the overall deadline is 30 minutes. Unfinished coverage is
 reported explicitly, so increase the overall deadline for a slow full sweep.
 The defaults are limits, not a promise that every scenario will be reached.
 
+`check` lists capability exclusions explicitly: native monitors for Copilot and
+Codex, and detached/mixed subagents for those two profiles. An exclusion is not a
+pass. `run` exercises the full catalog, including those capabilities, and returns
+an incomplete result when they cannot be established or classified. Selecting only
+excluded scenarios also returns incomplete.
+
 For a focused check after upgrading an agent:
 
 ```sh
-./calibrate.sh run --agents copilot --scenarios idle,working,question-choice,question-freeform,question-multiple
-./calibrate.sh run --agents claude,codex --unattended --retries 0 --deadline-seconds 1800
-./calibrate.sh run --agents codex --model codex=YOUR_MODEL --widths 120,70
+./calibrate.sh check --agents copilot --scenarios idle,working,question-choice,question-freeform,question-multiple
+./calibrate.sh check --agents claude,codex --unattended --retries 0 --deadline-seconds 1800
+./calibrate.sh check --agents codex --model codex=YOUR_MODEL --widths 120,70
 ```
 
 Run `./calibrate.sh help` for sampling, sizing, and deadline options. No live
@@ -59,15 +65,20 @@ output. A pending foreground tool plus its running helper establishes WORKING.
 A completed main turn with no outstanding controlled resources establishes IDLE.
 Native background launch evidence, a main Stop event, and live gates establish
 background work. A helper exiting inside a subagent does not establish that the
-subagent has reported; that requires its own completion evidence.
+subagent has reported; that requires its own completion evidence. Hashed session
+identifiers separate parent and child events. A matching foreground parent task
+result can establish the join when the child's hook ID is unavailable.
 
 Native permission requests in sessions configured for user review establish a
 blocking request after a settling interval. Copilot uses dialog notifications
 (permissions and elicitation) alongside a pending tool; its earlier permission
 request hook can precede automatic approval and is not a visible-dialog signal. A question-tool entry alone is
-insufficient: where no independent pending-permission signal is available, the
-harness asks for inspection or records an inconclusive scenario. This is useful
-coverage information, not a passing classifier test.
+insufficient. For Codex's synchronous questions, the driver records the settled
+screen interval without a label, submits a synthetic answer, and labels only that
+request's interval after its native result confirms receipt. Another tool or turn
+invalidates the interval. Missing receipt stays inconclusive. This does not cover
+asynchronous queued questions. Other unsupported signals require inspection or
+remain inconclusive.
 
 Every attempt prints an attach command and a confirmation command. To inspect,
 attach from another terminal, then detach with Ctrl-b d. An explicit label is
@@ -85,9 +96,12 @@ intent is not proof.
 Unattended runs can also accept this explicit confirmation file from a separate
 interactive terminal; they never manufacture one themselves.
 
-BACKGND fingerprints currently exist only for Claude. Other agents still run the
-background scenarios, but established background states report Unsupported until
-their profiles gain supported fingerprints. A model declining to use a native
+Claude has shell/monitor and detached-agent BACKGND fingerprints. Codex has a
+background-terminal fingerprint requiring its complete live controls immediately
+above the composer. Its detached agents do not expose a reliably observable live
+indicator in the inspected captures. Copilot remains WORKING while its runtime
+waits for asynchronous shells; a model Stop hook does not mean its UI is idle.
+The full catalog still attempts unsupported scenarios and preserves their outcomes. A model declining to use a native
 monitor or background agent reports Inconclusive. Prompt wording and model
 behavior are not guaranteed across upgrades.
 
@@ -148,6 +162,14 @@ approval review, and native exec-policy rules for command approval. File approva
 uses read-only sandbox mode. Question scenarios enable the installed CLI's
 `default_mode_request_user_input` feature for that invocation. Claude uses manual
 permissions with a narrow helper-command allow rule outside approval scenarios.
+For Claude's blocked-agent case, the launcher sets
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` so the native Agent call blocks even on
+versions that otherwise force interactive agents into the background. Its
+background-agent and combined cases set `showTurnDuration=false` in the disposable
+settings file to exercise the fleet-only BACKGND view. The default post-turn
+"Waiting for background agents" banner is intentionally classified WORKING by
+the existing profile; these cases do not claim it is BACKGND. Native async launch
+results establish background evidence when the tool input has no background flag.
 Copilot uses project hooks, native dialog notifications, schema field counts,
 and a helper-command allow rule. Its known folder-trust dialog is accepted only
 after the same owned-path check. Managed policy or
@@ -189,7 +211,7 @@ remain usable on other hosts.
 
 ## Adapter references
 
-Launch flags were checked against local Claude 2.1.263, Codex 0.153.4, and
+Launch flags were checked against local Claude 2.1.278, Codex 0.155.1, and
 Copilot 1.0.86 help.
 Hook adapters follow [Claude's hook reference](https://code.claude.com/docs/en/hooks),
 [Codex's hook reference](https://learn.chatgpt.com/docs/hooks), and

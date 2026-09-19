@@ -18,8 +18,12 @@ Upstream snapshots supplement the local captures; they do not establish that
 every prompt variant was observed live in 0.153.4. The stale-prompt fixture and
 incidental background prose are regression constructions using these same shapes.
 
-Codex BACKGND detection is not covered. DONE means an observed foreground turn
-returned to the composer; it does not guarantee detached work has completed.
+`codex-background-terminal.txt` reproduces the complete terminal control line
+immediately above the composer, verified with Codex 0.155.1 on 2026-09-19.
+Native tool/Stop events plus a live synthetic helper established background work;
+releasing it verified the return to IDLE. Bare counts, incomplete controls, and
+lines separated from the last composer are negative cases. Detached agents without
+a visible indicator are still not covered; DONE cannot guarantee they completed.
 
 `codex-working-terminal-summary.txt` is scrubbed from the live calibration harness
 on 2026-09-07, Codex CLI 0.153.4. A repo-owned helper gate and a pending foreground

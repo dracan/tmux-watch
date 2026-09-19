@@ -76,6 +76,24 @@ public class CodexTests
         Assert.Equal(PaneState.Idle, Classifier.Classify(prose + "\n" + Fixture("idle"), false));
 
     [Fact]
+    public void Background_terminal_requires_live_controls_adjacent_to_last_composer()
+    {
+        var screen = Fixture("background-terminal");
+        var result = Classifier.Inspect(screen, false);
+        Assert.Equal(PaneState.Backgnd, result.State);
+        Assert.Equal(BackgndReason.BackgroundTask, result.Reason);
+        Assert.NotEqual(PaneState.Backgnd, new PaneClassifier(WatchConfig.ClaudeProfile()).Classify(screen, false));
+        Assert.NotEqual(PaneState.Backgnd, new PaneClassifier(WatchConfig.CopilotProfile()).Classify(screen, false));
+        Assert.Equal(PaneState.Idle, Classifier.Classify(screen.Replace("\n\n\u203a", "\nFinished earlier.\n\u203a"), false));
+        Assert.Equal(PaneState.Idle, Classifier.Classify(screen.Replace(" /ps to view", " help"), false));
+        Assert.Equal(PaneState.Idle, Classifier.Classify(screen.Replace("1 background", "0 background"), false));
+        Assert.Equal(PaneState.Idle, Classifier.Classify(screen + "\n\u203a New prompt", false));
+        var profile = WatchConfig.CodexProfile();
+        profile.BackgroundTaskBeforePromptPattern = "";
+        Assert.Equal(PaneState.Idle, new PaneClassifier(profile).Classify(screen, false));
+    }
+
+    [Fact]
     public void Typed_text_does_not_activate_waiting_or_working()
     {
         var screen = "\u203A explain enter to submit answer and esc to interrupt and \u203A 1. Yes";

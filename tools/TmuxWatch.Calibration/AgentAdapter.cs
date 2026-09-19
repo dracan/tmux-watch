@@ -67,7 +67,11 @@ public static class AgentAdapter
         if (id == "claude")
         {
             var settings = Path.Combine(workspace, "claude-settings.json");
-            File.WriteAllText(settings, JsonSerializer.Serialize(new { hooks }));
+            // Exercise the fleet-only background UI without the optional
+            // post-turn waiting banner. This is invocation-local.
+            var settingsData = new Dictionary<string, object> { ["hooks"] = hooks };
+            if (scenario.Id is "background-agent" or "background-both") settingsData["showTurnDuration"] = false;
+            File.WriteAllText(settings, JsonSerializer.Serialize(settingsData));
             args.AddRange(["--setting-sources", "", "--settings", settings, "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--permission-mode", "manual"]);
             if (!scenario.Id.StartsWith("approval-")) args.AddRange(["--allowedTools", "Bash(python3 calibration-helper.py *)"]);
         }
@@ -108,6 +112,7 @@ public static class AgentAdapter
         File.WriteAllText(launcher, "#!/bin/sh\n" +
             "unset CLAUDECODE TMUX TMUX_PANE\n" +
             "export TERM=xterm-256color\n" +
+            (id == "claude" && scenario.Id == "blocked-agent" ? "export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1\n" : "") +
             "exec timeout --foreground --signal=TERM --kill-after=5s " + lifetimeSeconds + " " +
             Processes.Quote(executable) + " " + string.Join(" ", args.Select(Processes.Quote)) + "\n");
         return launcher;

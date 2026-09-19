@@ -155,6 +155,10 @@ public sealed class AgentProfile
     /// </summary>
     public string BackgroundAgentRowPattern { get; set; } = "";
 
+    /// <summary>Optional complete background-task status line immediately before
+    /// the last composer. Empty disables this position-specific check.</summary>
+    public string BackgroundTaskBeforePromptPattern { get; set; } = "";
+
     /// <summary>Any one of these tokens in the status area indicates IDLE. Used only when
     /// <see cref="IdlePromptPattern"/> is empty.</summary>
     public List<string> IdleHints { get; set; } = new();
@@ -196,6 +200,8 @@ public sealed class AgentProfile
 
     /// <summary>Compiled background-task counter, or null when none is configured.</summary>
     public Regex? CompileBackgroundTask() => CompileOrNull(BackgroundTaskPattern);
+
+    public Regex? CompileBackgroundTaskBeforePrompt() => CompileOrNull(BackgroundTaskBeforePromptPattern);
 
     /// <summary>Compiled background-agent row, or null when none is configured.</summary>
     public Regex? CompileBackgroundAgentRow() => CompileOrNull(BackgroundAgentRowPattern);

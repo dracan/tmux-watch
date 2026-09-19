@@ -1,5 +1,67 @@
 # Validation record
 
+## Current follow-up validation (2026-09-19)
+
+The follow-up uses Claude Code 2.1.278, Codex CLI 0.155.1, and Copilot CLI
+1.0.86 at 120 and 70 columns. Across the main sweeps and explicitly identified
+focused reruns, all 66 supported scenario/width cases passed: 174 live assertions,
+with zero classification mismatches in established samples. The full unit suite
+passed 439 tests, including the real tmux round trip; build had no warnings or
+errors. All 13 deterministic monitor replay groups passed. The sections below this update preserve the initial
+harness findings; their unsupported/inconclusive entries are historical and are
+superseded only where this update records a successful check.
+
+The Copilot supported sweep `20260919-152520-8883f000` passed all 20 scenario/width
+cases, including target sampling, applicable return-to-IDLE checks, and live DONE
+acknowledgement. Each target had 12 independently established samples with no
+mismatches. Copilot's background-shell case expects WORKING: the runtime remains
+busy after the model Stop while the async shell is alive. Its previously missing
+interrupt-bearing wait line now has a profile token and a synthetic fixture.
+
+Codex sweep `20260919-152519-073e3b41` passed 18 of 20 cases. Its two free-text
+cases remained inconclusive because native notes are returned with a `user_note:`
+prefix. After correcting the minimal receipt parser, focused run
+`20260919-153045-19cc49e0` passed both free-text cases, their completion checks,
+and acknowledgement. The earlier report retains its incomplete exit code.
+The complete background-terminal controls immediately above the composer now
+classify BACKGND; bare counts and stale transcript controls do not.
+
+Codex question verification requires a native result for the same pending call
+confirming the synthetic answer. Only that captured interval is retrospectively
+labelled WAITING. Async queued questions, later unrelated tools, missing results,
+and answers that did not arrive cannot produce a passing label. A short delay
+between literal input and Enter accommodates native paste/burst buffering.
+
+Claude's initial follow-up sweep is `20260919-152517-3af61d76`. Its native
+interactive Agent calls now default to async execution and omit the old input
+background flag. The helper records only the verified async-result boolean;
+it never stores the result body. Focused run `20260919-153614-8480cfff` verifies
+the corrected six child scenario/width cases, all of which passed target,
+completion, and live acknowledgement checks. The initial sweep passed the other
+20 Claude cases; its original incomplete child attempts remain recorded.
+Foreground-only mode creates a truly blocked
+native Agent call. Agent/mixed background cases use `showTurnDuration=false`
+to exercise the fleet-only UI. The default post-turn background-wait banner
+remains WORKING under the existing profile. These invocation-local settings are
+part of the coverage setup, not changes to the user's normal Claude configuration.
+
+The `check` command lists 12 excluded scenario/width cases: native monitors and
+detached/mixed agents for Copilot and Codex. It does not claim those passed.
+`run` still attempts the full catalog and preserves unsupported/inconclusive
+outcomes. Codex's invisible detached agents cannot be inferred from terminal
+counts, transcript prose, or history in the pure production classifier.
+
+The Claude login-expiry reminder was also corrected: an upcoming expiry is not
+an active login screen. Actual login screens remain suppressed from captures.
+The unanswered interactive confirmation check `20260919-154237-e04ab20c`
+exited incomplete at its 30-second scenario deadline without input and cleaned
+up the owned pane. Console cancellation cannot leave a prompt waiting forever.
+
+All raw reports and captures remain private and gitignored. Physical speaker and
+desktop pointer testing remains optional and was not enabled.
+
+## Initial harness validation
+
 Development validation on 2026-09-07 used .NET SDK 10.0.201, tmux 3.4,
 Claude Code 2.1.263 (hook-reported model `claude-opus-5[1m]`), and Codex CLI
 0.153.4 (hook-reported model `gpt-6-astra`).

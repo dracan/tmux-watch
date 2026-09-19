@@ -1,0 +1,7 @@
+Synthetic operation started.
+
+  1 background terminal running · /ps to view · /stop to close
+
+› Ask Codex to do anything
+
+  synthetic-model default

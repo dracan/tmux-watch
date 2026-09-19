@@ -44,6 +44,7 @@ public class PaneClassifierTests
     [InlineData("waiting-ask-question-freeform.txt", PaneState.Waiting)]
     [InlineData("waiting-ask-question-multiple.txt", PaneState.Waiting)]
     [InlineData("working.txt", PaneState.Working)]
+    [InlineData("copilot-working-background-wait.txt", PaneState.Working)]
     [InlineData("working-action-label.txt", PaneState.Working)]
     [InlineData("idle.txt", PaneState.Idle)]
     public void Classifies_copilot_fixtures(string fixture, PaneState expected)
@@ -181,6 +182,19 @@ public class PaneClassifierTests
             var text = $"────\n {glyph} Working esc cancel   Claude Opus 4.8 · 1M context";
             Assert.Equal(PaneState.Working, Classifier.Classify(text, dead: false));
         }
+    }
+
+    [Fact]
+    public void Copilot_background_wait_requires_live_structure_and_is_profile_specific()
+    {
+        var text = Fixture("copilot-working-background-wait.txt");
+        Assert.NotEqual(PaneState.Working, Classifier.Classify(text.Replace("esc interrupt", "completed"), false));
+        Assert.NotEqual(PaneState.Working, Classifier.Classify(text.Replace("\u25ce Waiting", "Waiting"), false));
+        Assert.NotEqual(PaneState.Working, ClaudeClassifier.Classify(text, false));
+        Assert.NotEqual(PaneState.Working, new PaneClassifier(WatchConfig.CodexProfile()).Classify(text, false));
+        var profile = WatchConfig.CopilotProfile();
+        profile.WorkingLinePattern = "";
+        Assert.NotEqual(PaneState.Working, new PaneClassifier(profile).Classify(text, false));
     }
 
     [Fact]

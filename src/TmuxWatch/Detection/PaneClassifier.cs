@@ -38,6 +38,7 @@ public sealed class PaneClassifier
     private readonly Regex? _workingBackgroundAgents;
     private readonly Regex? _idlePrompt;
     private readonly Regex? _backgroundTask;
+    private readonly Regex? _backgroundTaskBeforePrompt;
     private readonly Regex? _backgroundAgentRow;
 
     // Default scan depth. The current Claude Code build renders the live spinner line
@@ -61,6 +62,7 @@ public sealed class PaneClassifier
         _workingBackgroundAgents = profile.CompileWorkingBackgroundAgents();
         _idlePrompt = profile.CompileIdlePrompt();
         _backgroundTask = profile.CompileBackgroundTask();
+        _backgroundTaskBeforePrompt = profile.CompileBackgroundTaskBeforePrompt();
         _backgroundAgentRow = profile.CompileBackgroundAgentRow();
     }
 
@@ -245,7 +247,10 @@ public sealed class PaneClassifier
     /// the background as @name" frozen after the sub-agent reported). Matching any of them
     /// would pin the pane in BACKGND for good.
     ///
-    /// Returns which of the two matched rather than a bare bool, because they carry
+    /// Profiles may also define a complete task-control line immediately before the
+    /// last composer (Codex). This exact position does not widen transcript scanning.
+    ///
+    /// Returns which kinds matched rather than a bare bool, because they carry
     /// different termination guarantees and the monitor's grace-period backstop applies to
     /// only one of them - see <see cref="BackgndReason"/>. A return of
     /// <see cref="BackgndReason.None"/> means the pane is not BACKGND.
@@ -253,6 +258,9 @@ public sealed class PaneClassifier
     private BackgndReason BackgndReasons(List<string> statusLines, int composer)
     {
         var reasons = BackgndReason.None;
+
+        if (composer > 0 && (_backgroundTaskBeforePrompt?.IsMatch(statusLines[composer - 1]) ?? false))
+            reasons |= BackgndReason.BackgroundTask;
 
         if (composer < 0 || (_backgroundTask is null && _backgroundAgentRow is null))
             return reasons;

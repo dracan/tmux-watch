@@ -27,6 +27,8 @@ public sealed class Report
         WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() },
     };
+    public string Mode { get; init; } = "full diagnostic catalog";
+    public List<CheckResult> Exclusions { get; } = [];
     public string Schema { get; } = "tmux-watch-calibration-v1";
     public int StatusLineCount { get; } = 16;
     public double LiveBackgroundGraceSeconds { get; } = 120;
@@ -46,7 +48,7 @@ public sealed class Report
         get
         {
             var code = Evaluation.ExitCode(AllChecks());
-            return Finished is null && code == 0 ? 2 : code;
+            return (Finished is null || (Exclusions.Count > 0 && Attempts.Count == 0)) && code == 0 ? 2 : code;
         }
     }
 
@@ -63,6 +65,9 @@ public sealed class Report
         File.Move(Path.Combine(Root, "report.json.tmp"), Path.Combine(Root, "report.json"), true);
         var text = new StringBuilder("# Agent calibration report\n\n");
         text.AppendLine($"Started: {Started:O}\n\nExit status: {ExitCode} (0 complete, 1 mismatch, 2 incomplete)\n");
+        text.AppendLine("Scope: " + Mode + "\n");
+        foreach (var excluded in Exclusions)
+            text.AppendLine($"Excluded: {Cell(excluded.Name)} - {Cell(excluded.Detail)}\n");
         text.AppendLine("| Check | Outcome | Detail |\n| --- | --- | --- |");
         foreach (var check in AllChecks()) text.AppendLine($"| {Cell(check.Name)} | {check.Outcome} | {Cell(check.Detail)} |");
         text.AppendLine("\nLive attempts and exact capture paths are in report.json. Replay uses scrubbed fixtures and does not establish live coverage.");

@@ -1,0 +1,5 @@
+Synthetic background operation started.
+──────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────
+ ◎ Waiting for background shells · 363 B esc interrupt

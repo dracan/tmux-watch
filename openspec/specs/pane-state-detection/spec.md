@@ -450,7 +450,7 @@ The system SHALL provide a built-in Codex profile for WAITING, WORKING, and IDLE
 
 An optional profile `WaitingChromePattern` SHALL detect blocking question and confirmation footer lines in the same composer-scoped region. Codex SHALL recognize submit-answer and submit-all footers, including free-text and notes editors, without requiring an interrupt marker on the same line.
 
-An optional profile `WorkingLinePattern` SHALL match full live status lines containing a leading status bullet, an action label, elapsed time, and the interrupt hint. WAITING SHALL take precedence over WORKING, and WORKING over the composer-derived IDLE. New patterns SHALL default to disabled for existing profiles. The classifier SHALL never emit DONE and SHALL not add Codex BACKGND fingerprints.
+An optional profile `WorkingLinePattern` SHALL match full live status lines containing a leading status bullet, an action label, elapsed time, and the interrupt hint. WAITING SHALL take precedence over WORKING, and WORKING over the composer-derived IDLE. New patterns SHALL default to disabled for existing profiles. The classifier SHALL never emit DONE. Codex background-task detection SHALL require the separate complete live terminal-status fingerprint; detached agents without a live UI indicator SHALL not be inferred.
 
 #### Scenario: Command and edit approvals
 - **WHEN** Codex shows a live command or file-edit approval with numbered choices and confirmation footer
@@ -505,3 +505,18 @@ The Copilot profile SHALL recognize choice, free-text, and multiple-field ask-us
 #### Scenario: Pattern disabled
 - **WHEN** WaitingPanelPattern is empty
 - **THEN** the additional panel check is disabled and existing signals still apply
+
+### Requirement: Live activity and terminal status drift
+Copilot SHALL recognize verified interrupt-bearing background-wait status as live activity. Codex SHALL recognize a complete live background-terminal control line immediately above its composer as a background task. Matching SHALL remain profile-driven, stateless, and bounded. Transcript prose and invisible agent state MUST NOT establish a background fingerprint.
+
+#### Scenario: Copilot waits for background execution
+- **WHEN** Copilot renders its live background-wait status with the interrupt control
+- **THEN** the pane remains WORKING rather than Unknown
+
+#### Scenario: Codex terminal status next to composer
+- **WHEN** a complete background-terminal control line immediately precedes the last composer and no higher-precedence signal exists
+- **THEN** the pane is BACKGND with the background-task reason
+
+#### Scenario: Old count in transcript
+- **WHEN** a terminal count appears in prose or above intervening transcript content
+- **THEN** it does not establish BACKGND

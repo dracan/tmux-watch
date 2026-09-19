@@ -114,6 +114,8 @@ public sealed class OwnedTmux : IAsyncDisposable
     {
         RequireOwned(pane);
         await Checked(ct, "send-keys", "-t", pane, "-l", "--", text);
+        // Let terminal burst/paste buffering deliver text before submitting it.
+        await Task.Delay(250, ct);
         await SendKey(pane, "Enter", ct);
     }
 

@@ -98,14 +98,20 @@ footer can also say `esc to interrupt`. Codex detection therefore checks the
 submit-answer or submit-all footer before looking for a complete timed working
 line. Old question footers above the last composer are ignored.
 
-Discovery, IDLE, and WORKING were checked on Codex CLI **0.153.4**. Approval and
-question fixtures use pinned upstream renderer snapshots; see
+Core states were checked on Codex CLI **0.153.4** and **0.155.1**. Approval and
+question fixtures also use pinned upstream renderer snapshots; see
 [fixture provenance](tests/TmuxWatch.Tests/fixtures/codex-provenance.md).
 Custom keybindings or later UI changes may require profile overrides.
 
-Codex BACKGND detection is outside this version's scope. Its DONE badge means the
-observed foreground turn returned to the composer; it does not track completion
-of detached agents or background tasks.
+Codex background terminals classify BACKGND only when the complete live terminal
+control line sits immediately above the last composer. Detached agents have no
+verified live indicator in the inspected UI, so their completion is not tracked.
+A terminal count cannot establish whether an invisible subagent is also running.
+
+Run `./calibrate.sh check --unattended` after agent upgrades to exercise the
+supported live scenarios at both terminal widths. The report lists capability
+exclusions. Use `./calibrate.sh run` for the full diagnostic catalog; see the
+[harness guide](tools/TmuxWatch.Calibration/README.md) for scope and evidence.
 
 ## Usage
 
@@ -271,6 +277,10 @@ last composer, or throughout the scanned tail when no composer is present.
 `workingLinePattern` is an optional regex matched against individual lines in
 that tail. Both default to disabled; Codex uses them to distinguish question
 editors from live timed work. The `\u203A` regex escape identifies Codex's caret.
+
+`backgroundTaskBeforePromptPattern` is an optional complete-line regex matched
+only on the last nonblank line immediately before the final composer. Codex uses
+it for live terminal controls. Empty disables it; it never scans earlier prose.
 
 Set `tmuxExecutable` to `psmux` (or another tmux-compatible CLI) to run against a
 different multiplexer host.

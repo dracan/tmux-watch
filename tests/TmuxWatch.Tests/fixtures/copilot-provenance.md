@@ -13,3 +13,9 @@ The panel heading plus column-zero borders is the fingerprint. Internal input
 rules are indented, and the final border must end the scanned tail so a panel
 above a later composer cannot match. No assertion is made about forms taller
 than the existing 16-nonblank-line scan window.
+
+`copilot-working-background-wait.txt` preserves the live spinner, background-shell
+wait label, and interrupt control seen on the same version. The runtime remains
+busy after the model's Stop while a native async helper runs. Both widths passed
+12 established WORKING samples and return-to-IDLE checks after helper release.
+Transcript wording without the spinner and interrupt control is not sufficient.

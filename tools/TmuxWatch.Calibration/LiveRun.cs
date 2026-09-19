@@ -12,7 +12,7 @@ public sealed class LiveRun(Options options)
         var scenarios = options.Scenarios.Length == 0 ? Scenario.All : options.Scenarios.Select(id =>
             Scenario.All.SingleOrDefault(s => s.Id == id) ?? throw new ArgumentException("Unknown scenario: " + id)).ToArray();
         var root = Report.PrivateDirectory(Path.Combine(options.Output, DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]));
-        var report = new Report { Root = root };
+        var report = new Report { Root = root, Mode = options.Command == "check" ? "supported automated checks; exclusions listed separately" : "full diagnostic catalog" };
         report.Replay.AddRange(MonitorReplay.Run(Path.Combine(AppContext.BaseDirectory, "fixtures")));
         report.Save();
         Console.WriteLine("Run evidence: " + root);
@@ -48,9 +48,17 @@ public sealed class LiveRun(Options options)
                     report.Save();
                     continue;
                 }
-                foreach (var scenario in scenarios)
+                foreach (var scenario in scenarios.Select(s => s.ForAgent(id)))
                     foreach (var width in options.Widths.Distinct())
                     {
+                        if (options.Command == "check" && scenario.CheckExclusion(id) is { } excluded)
+                        {
+                            report.Exclusions.Add(new(Key(id, scenario.Id, width), Outcome.Unsupported, excluded));
+                            reached.Add(Key(id, scenario.Id, width));
+                            Console.WriteLine($"Excluded {id}/{scenario.Id}/{width}: {excluded}");
+                            report.Save();
+                            continue;
+                        }
                         for (var retry = 0; retry <= options.Retries; retry++)
                         {
                             ct.ThrowIfCancellationRequested();
@@ -103,7 +111,7 @@ public sealed class LiveRun(Options options)
             report.Save();
             Console.WriteLine("Report: " + Path.Combine(root, "report.md"));
         }
-        return Evaluation.ExitCode(report.AllChecks());
+        return report.ExitCode;
     }
 
     private async Task RunAttempt(OwnedTmux tmux, Preflight agent, Scenario scenario, Attempt attempt, Report report, CancellationToken ct)
@@ -128,6 +136,9 @@ public sealed class LiveRun(Options options)
         var answerCount = 0;
         string? answeredQuestionCall = null;
         DateTimeOffset? answeredQuestionAt = null;
+        EvidenceEvent? receiptQuestion = null;
+        DateTimeOffset? receiptSent = null;
+        DateTimeOffset? editorOpened = null;
         var success = false;
         try
         {
@@ -172,8 +183,9 @@ public sealed class LiveRun(Options options)
                     ? JsonSerializer.Deserialize<Confirmation>(File.ReadAllText(confirmationPath), Report.Json) : null;
                 var expected = Evidence.Establish(scenario, events, dead, now, confirmation);
                 var questionCall = events.LastOrDefault(e => e.Event == "PreToolUse" && Evidence.IsQuestion(e.Tool));
-                if (scenario.Id == "question-freeform" && !freeformEditor && questionCall?.OptionCounts is [> 0] &&
-                    expected?.State == PaneState.Waiting && now - expected.Since > TimeSpan.FromSeconds(1))
+                if (scenario.Id == "question-freeform" && !freeformEditor && questionCall?.OptionCounts is [> 0] && QuestionReceipt.IsPending(questionCall, events) &&
+                    ((expected?.State == PaneState.Waiting && now - expected.Since > TimeSpan.FromSeconds(1)) ||
+                     (agent.Agent == "codex" && now - questionCall.At > TimeSpan.FromSeconds(2))))
                 {
                     // Exercise the native editor, not just a menu whose question
                     // happens to request free text. These actions are adapter-specific.
@@ -190,6 +202,7 @@ public sealed class LiveRun(Options options)
                     }
                     if (freeformEditor)
                     {
+                        editorOpened = now;
                         attempt.Actions.Add(new(now, "Selected native free-text editor for the pending question"));
                         await Task.Delay(500, ct);
                         continue;
@@ -211,13 +224,28 @@ public sealed class LiveRun(Options options)
                     await tmux.SendText(pane, "/exit", ct);
                     attempt.Actions.Add(new(now, "Requested native /exit after confirmed idle"));
                 }
+                if (receiptQuestion is not null && receiptSent is not null &&
+                    !attempt.Checks.Any(c => c.Name == "target") &&
+                    QuestionReceipt.Establish(attempt.Samples, receiptQuestion, editorOpened ?? receiptQuestion.At, receiptSent.Value, events))
+                    attempt.Checks.Add(Evaluation.Assess("target", attempt.Samples, scenario.Target, scenario.Reason, true, options.StableSamples));
+                var canVerifyAnswer = agent.Agent == "codex" && scenario.Id.StartsWith("question-") &&
+                    questionCall is not null && questionCall.Call.Length > 0 && scenario.TargetEstablished(events, freeformEditor) &&
+                    QuestionReceipt.IsPending(questionCall, events) &&
+                    attempt.Samples.Count(s => s.At - (editorOpened ?? questionCall.At) > TimeSpan.FromSeconds(1)) >= options.StableSamples * 2;
                 var targetSamples = attempt.Samples.Count(s => s.Expected?.State == scenario.Target &&
                     s.Expected.Reason == scenario.Reason && s.At - s.Expected.Since >= TimeSpan.FromSeconds(1));
-                if (targetCaptured is null && targetSamples >= options.StableSamples * 2)
+                if (targetCaptured is null && (targetSamples >= options.StableSamples * 2 || canVerifyAnswer))
                 {
                     targetCaptured = now;
-                    var supported = scenario.Target != PaneState.Backgnd || agent.Agent == "claude";
-                    attempt.Checks.Add(Evaluation.Assess("target", attempt.Samples, scenario.Target, scenario.Reason, supported, options.StableSamples));
+                    var supported = scenario.Supported(agent.Agent);
+                    if (targetSamples >= options.StableSamples * 2)
+                        attempt.Checks.Add(Evaluation.Assess("target", attempt.Samples, scenario.Target, scenario.Reason, supported, options.StableSamples));
+                    else
+                    {
+                        receiptQuestion = questionCall;
+                        receiptSent = now;
+                        attempt.Actions.Add(new(now, "Submitting a synthetic answer to verify the captured native request"));
+                    }
                     if (scenario.Target is PaneState.Idle or PaneState.Dead) break;
                     // Release only after the independently established target was captured.
                     File.WriteAllText(Path.Combine(workspace, "release-all"), "release\n");
@@ -242,9 +270,9 @@ public sealed class LiveRun(Options options)
                     // Multiple-question tools can require one confirmation per
                     // field and a final submit. Continue only the same native call;
                     // never approve an unrelated operation during recovery.
-                    if (scenario.Id.StartsWith("question-") && answerCount < 5 && expected?.State == PaneState.Waiting &&
+                    if (scenario.Id.StartsWith("question-") && answerCount < 5 && (expected?.State == PaneState.Waiting || receiptQuestion is not null) &&
                         questionCall?.Call == answeredQuestionCall && questionCall is not null && questionCall.At == answeredQuestionAt &&
-                        !events.Any(e => e.Event == "PostToolUse" && e.Call == questionCall.Call && e.At > questionCall.At) &&
+                        QuestionReceipt.IsPending(questionCall, events) &&
                         lastAnswer is not null && now - lastAnswer > TimeSpan.FromSeconds(2))
                     {
                         if (agent.Agent == "copilot" && scenario.Id == "question-multiple" && answerCount == 1)
@@ -279,9 +307,9 @@ public sealed class LiveRun(Options options)
                 if (dead && scenario.Target != PaneState.Dead) break;
                 await Task.Delay(options.SampleMs, ct);
             }
-            if (targetCaptured is null)
+            if (!attempt.Checks.Any(c => c.Name == "target"))
                 attempt.Checks.Add(Evaluation.Assess("target", attempt.Samples, scenario.Target, scenario.Reason,
-                    scenario.Target != PaneState.Backgnd || agent.Agent == "claude", options.StableSamples));
+                    scenario.Supported(agent.Agent), options.StableSamples));
             else if (recoveryStart >= 0 && !attempt.Checks.Any(c => c.Name == "return-to-idle"))
                 attempt.Checks.Add(new("return-to-idle", Outcome.Inconclusive, "No independently established settled return to IDLE"));
             success = attempt.Checks.All(c => c.Outcome == Outcome.Pass);
@@ -312,8 +340,11 @@ public sealed class LiveRun(Options options)
         File.Move(path + ".tmp", path, true);
     }
 
-    private static bool LooksLikeLogin(string text) => text.Contains("device code", StringComparison.OrdinalIgnoreCase) ||
-        text.Contains("Sign in to", StringComparison.OrdinalIgnoreCase) || text.Contains("/login", StringComparison.OrdinalIgnoreCase);
+    public static bool LooksLikeLogin(string text) => text.Split('\n').Any(line =>
+        line.Contains("device code", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Sign in to", StringComparison.OrdinalIgnoreCase) ||
+        (line.Contains("/login", StringComparison.OrdinalIgnoreCase) &&
+         !System.Text.RegularExpressions.Regex.IsMatch(line, @"Your login expires in [1-9]\d* days?", System.Text.RegularExpressions.RegexOptions.IgnoreCase)));
 
     public static bool KnownTrustDialog(string agent, string text) => agent switch
     {
@@ -326,6 +357,14 @@ public sealed class LiveRun(Options options)
     };
 
     private static string Key(string agent, string scenario, int width) => $"{agent}/{scenario}/{width}";
-    private static async Task<string> ReadLine(CancellationToken ct) =>
-        (await Console.In.ReadLineAsync(ct) ?? "skip").Trim().ToLowerInvariant();
+    private static Task<string?>? pendingInput;
+
+    private static async Task<string> ReadLine(CancellationToken ct)
+    {
+        // Console.In can block synchronously and ignore ReadLineAsync cancellation.
+        // Reuse one pending read so a timed-out prompt cannot steal the next reply.
+        pendingInput ??= Task.Run(Console.ReadLine);
+        try { return (await pendingInput.WaitAsync(ct) ?? "skip").Trim().ToLowerInvariant(); }
+        finally { if (pendingInput.IsCompleted) pendingInput = null; }
+    }
 }

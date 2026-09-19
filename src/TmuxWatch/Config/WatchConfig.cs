@@ -108,15 +108,17 @@ public sealed class WatchConfig
 
     /// <summary>
     /// Codex CLI core states. Discovery, composer, and working status verified on
-    /// 0.153.4; approval/question shapes checked against upstream renderer snapshots
+    /// 0.153.4 and 0.155.1; approval/question shapes checked against upstream renderer snapshots
     /// (see fixtures/codex-provenance.md). Question editors share the composer caret
     /// and can also say "esc to interrupt", so their submit footer takes precedence
-    /// and WORKING requires a complete timed status line. No BACKGND inference.
+    /// and WORKING requires a complete timed status line. Background terminals
+    /// require a complete control line immediately above the composer.
     /// </summary>
     public static AgentProfile CodexProfile() => new()
     {
         Id = "codex",
         Command = "codex",
+        BackgroundTaskBeforePromptPattern = @"^\s*[1-9]\d* background terminals? running \u00B7 /ps to view \u00B7 /stop to close\s*$",
         WaitingCursorPattern = @"^\s*\u203A\s*\d+\.",
         WaitingFooterNavMarker = "",
         WaitingFooterCancelMarker = "",
@@ -141,6 +143,7 @@ public sealed class WatchConfig
         WaitingFooterCancelMarker = "esc to cancel",
         WorkingSpinnerGlyphs = "◎◉●○",
         WorkingWord = "Working",
+        WorkingLinePattern = @"^\s*[\u25CE\u25C9\u25CF\u25CB]\s+Waiting for background shells\b[^\r\n]*\besc interrupt(?:\s+[^\r\n]*)?$",
         WorkingFooterCancelMarker = "esc cancel",
         WorkingMarkerSufficient = false,
         IdleHints = new() { "/ commands", "? help", "space hold to record" },

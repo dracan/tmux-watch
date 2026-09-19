@@ -21,6 +21,22 @@ def emit(root, event, **fields):
     temporary.replace(target)
 
 
+def received_synthetic_answer(value):
+    if isinstance(value, dict):
+        return any(received_synthetic_answer(v) for v in value.values())
+    if isinstance(value, list):
+        return any(received_synthetic_answer(v) for v in value)
+    if isinstance(value, str):
+        if value in ("Amber", "Amber (Recommended)", "synthetic", "user_note: synthetic"):
+            return True
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return False
+        return not isinstance(parsed, str) and received_synthetic_answer(parsed)
+    return False
+
+
 def hook(root, event, scenario, agent):
     data = json.load(sys.stdin)
     tool = data.get("tool_name", data.get("toolName", ""))
@@ -47,6 +63,7 @@ def hook(root, event, scenario, agent):
     # messages, transcript paths, authentication output, or environment variables.
     child = data.get("agent_id", data.get("agentId", ""))
     call = data.get("tool_use_id", data.get("toolCallId", ""))
+    session = data.get("session_id", data.get("sessionId", ""))
     questions = inputs.get("questions", [])
     if not isinstance(questions, list):
         questions = []
@@ -59,11 +76,18 @@ def hook(root, event, scenario, agent):
     option_counts = [len(q.get("options", q.get("choices", [])))
                      if isinstance(q, dict) and isinstance(q.get("options", q.get("choices", [])), list) else 0
                      for q in questions]
+    response = data.get("tool_response", {})
+    if (event == "PostToolUse" and tool == "Agent" and isinstance(response, dict)
+            and response.get("isAsync") is True and response.get("status") == "async_launched"):
+        background = True
     emit(root, event, tool=tool, gate=is_gate, background=background,
          child=hashlib.sha256(str(child).encode()).hexdigest()[:16] if child else "",
          call=hashlib.sha256(str(call).encode()).hexdigest()[:16] if call else "",
+         session=hashlib.sha256(str(session).encode()).hexdigest()[:16] if session else "",
          model=data.get("model", ""), notification=data.get("notification_type", ""),
-         questionCount=len(questions), optionCounts=option_counts)
+         questionCount=len(questions), optionCounts=option_counts,
+         answerReceived=(event == "PostToolUse" and tool == "request_user_input" and
+                         received_synthetic_answer(data.get("tool_response", {}))))
     # A native approval is forced only for the synthetic scenario operation.
     approval = event == "PreToolUse" and (
         (scenario == "approval-command" and is_gate) or

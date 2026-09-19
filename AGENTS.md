@@ -8,7 +8,7 @@ point here so there is a single source of truth.
 
 `tmux-watch` is a C# / Spectre.Console console app - read-only toward pane *content*,
 see "The tmux boundary" below - that watches
-coding-agent CLI sessions (GitHub Copilot CLI and Claude Code) running in **tmux**
+coding-agent CLI sessions (GitHub Copilot CLI, Claude Code, and Codex CLI) running in **tmux**
 panes, classifies each pane (WAITING / WORKING / BACKGND / IDLE / DEAD) from its captured
 status bar, and surfaces the ones needing the user - with a jump-to-pane action.
 The monitor also derives a **DONE** state ("turn finished, your move") from the
@@ -215,6 +215,12 @@ environment (global desktop pointer). It is on by default (disable via
 unconditionally on startup) and a no-op on unsupported hosts; it must never become
 a channel that reaches a pane.
 
+## Git workflow
+
+Work, commit, and push directly on `main` in this repository. Use a feature branch
+or pull request only when the user explicitly requests one. Check the current
+branch before starting changes; preserve unrelated work when switching branches.
+
 ## OpenSpec workflow
 
 This repo uses OpenSpec for non-trivial changes. Changes live in
@@ -292,6 +298,14 @@ instead of tripping WORKING - and a just-launched agent renders a bare `0s` with
 separator at all, so a meter-shaped token would miss the opening seconds of every agent.
 Structure again, not decoration. Note that `← for agents` in the footer is **not** a
 signal: it renders whether or not any agent is running.
+
+Codex renders its background-terminal controls immediately above its composer.
+`BackgroundTaskBeforePromptPattern` matches only that complete line immediately
+before the last composer, including the native view/stop controls. It does not
+search earlier transcript lines or accept a bare count. Detached Codex agents
+without a live UI indicator cannot be inferred from prose or remembered events.
+Copilot's interrupt-bearing "Waiting for background shells" status is WORKING:
+its runtime is still busy even when a model Stop hook has already fired.
 
 ## Buffered stdout is load-bearing
 
