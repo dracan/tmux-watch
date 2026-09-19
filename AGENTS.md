@@ -1,7 +1,7 @@
 # Agent guide: tmux-watch
 
-Canonical instructions for any coding agent working in this repo (Copilot CLI,
-Claude Code, ...). Per-agent files (`CLAUDE.md`, `.github/copilot-instructions.md`)
+Canonical instructions for any coding agent working in this repo (Codex,
+Copilot CLI, Claude Code, ...). Per-agent files (`CLAUDE.md`, `.github/copilot-instructions.md`)
 point here so there is a single source of truth.
 
 ## What this is
@@ -317,7 +317,21 @@ not the underlying handle.
 
 ## Agent harness parity
 
-OpenSpec workflow skills are duplicated per agent: `.claude/skills` +
-`.claude/commands/opsx` (Claude Code) and `.github/skills` + `.github/prompts`
-(Copilot CLI). When you change a workflow skill for one agent, update the other
-agent's equivalent so they stay in parity.
+Codex reads this file directly; Claude Code imports it through `CLAUDE.md`.
+Codex's `.agents/skills` is a relative symlink to `.claude/skills`, so both agents
+use the same local skill files. Edit skills at `.claude/skills`; preserve the link.
+Claude Code also has `.claude/commands/opsx` wrappers. Copilot CLI keeps its
+equivalents in `.github/skills` and `.github/prompts`; update those equivalents
+when changing a workflow so they stay in parity.
+
+When using the shared OpenSpec skills in Codex, translate Claude-specific harness
+names to the available capabilities: ask the user when `AskUserQuestion` is named,
+track progress with a plan or checklist when `TodoWrite` is named, and read the
+named skill's `SKILL.md` when `Skill` is named. If `Task` delegation is unavailable,
+perform that step locally. If a referenced skill is missing, report it rather
+than claiming the step succeeded.
+
+Claude's `/opsx:propose`, `/opsx:apply`, `/opsx:explore`, and `/opsx:archive` map to
+Codex's `$openspec-propose`, `$openspec-apply-change`, `$openspec-explore`, and
+`$openspec-archive-change`, respectively. Use the current agent's invocation syntax
+when suggesting a next step.
