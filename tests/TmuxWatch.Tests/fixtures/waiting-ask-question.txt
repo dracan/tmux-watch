@@ -1,0 +1,11 @@
+──────────────────────────────────────────────────────────────────────
+ Copilot needs information.
+ Choose a synthetic color.
+
+ Color:
+ ❯ Amber
+   Blue
+   Other (type your answer)
+
+ ↑/↓ select · enter accept · ctrl+d decline · esc cancel
+──────────────────────────────────────────────────────────────────────

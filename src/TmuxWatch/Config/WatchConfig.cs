@@ -124,15 +124,18 @@ public sealed class WatchConfig
         WorkingSpinnerGlyphs = "",
         WorkingWord = "",
         WorkingFooterCancelMarker = "",
-        WorkingLinePattern = @"^\s*[\u2022\u25E6]\s+[^()\r\n]+\(\d+[smh](?:\s+\d+[smh])*\s+\u2022\s+esc to interrupt\)\s*$",
+        WorkingLinePattern = @"^\s*[\u2022\u25E6]\s+[^()\r\n]+\(\d+[smh](?:\s+\d+[smh])*\s+\u2022\s+esc to interrupt\)(?:\s+\u00B7\s+\d+ background terminals? running(?:\s+\u00B7\s+[^\r\n]+)?)?\s*$",
         IdlePromptPattern = @"^\s*\u203A(?!\s*\d+\.)",
     };
 
-    /// <summary>Built-in Copilot CLI profile (tokens verified against Copilot v1.0.63).</summary>
+    /// <summary>Built-in Copilot CLI profile (core and form tokens verified against Copilot v1.0.86).</summary>
     public static AgentProfile CopilotProfile() => new()
     {
         Id = "copilot",
         Command = "copilot",
+        // The question panel replaces the composer. Its heading and enclosing
+        // rules are invariant across choice, text, and multiple-field forms.
+        WaitingPanelPattern = @"(?m)^\u2500{3,}\n[ \t]*Copilot needs information\.[ \t]*\n(?:(?!\u2500)[^\n]*\n)+\u2500{3,}\z",
         WaitingCursorPattern = @"❯\s*\d+\.",
         WaitingFooterNavMarker = "↑/↓",
         WaitingFooterCancelMarker = "esc to cancel",

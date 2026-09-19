@@ -42,6 +42,10 @@ public sealed class AgentProfile
     /// </summary>
     public string WaitingChromePattern { get; set; } = "";
 
+    /// <summary>Optional multiline regex for a blocking panel in the scanned tail.
+    /// Anchor the panel boundaries to exclude transcript prose. Empty disables it.</summary>
+    public string WaitingPanelPattern { get; set; } = "";
+
     /// <summary>
     /// Optional regex for a complete live status line in the scanned tail. Use anchors
     /// and live qualifiers to exclude ordinary prose and frozen completion banners.
@@ -160,6 +164,8 @@ public sealed class AgentProfile
     public Regex CompileWaitingCursor() => new(WaitingCursorPattern, RegexOptions.Compiled);
 
     public Regex? CompileWaitingChrome() => CompileOrNull(WaitingChromePattern);
+
+    public Regex? CompileWaitingPanel() => CompileOrNull(WaitingPanelPattern);
 
     public Regex? CompileWorkingLine() => CompileOrNull(WorkingLinePattern);
 

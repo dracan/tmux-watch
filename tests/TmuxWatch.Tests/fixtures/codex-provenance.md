@@ -20,3 +20,10 @@ incidental background prose are regression constructions using these same shapes
 
 Codex BACKGND detection is not covered. DONE means an observed foreground turn
 returned to the composer; it does not guarantee detached work has completed.
+
+`codex-working-terminal-summary.txt` is scrubbed from the live calibration harness
+on 2026-09-07, Codex CLI 0.153.4. A repo-owned helper gate and a pending foreground
+tool hook independently established WORKING. The timed status line appended a
+background-terminal count and controls; the original pattern rejected that suffix
+and all 12 established samples classified IDLE. Only the live bullet, timer,
+interrupt qualifier, and terminal-summary structure are used by the updated token.

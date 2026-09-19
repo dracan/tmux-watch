@@ -1,0 +1,13 @@
+──────────────────────────────────────────────────────────────────────
+ Copilot needs information.
+ Provide two synthetic values.
+
+ [Color]  Label
+
+ Color:
+ ❯ Amber
+   Blue
+   Other (type your answer)
+
+ ↑/↓ select · enter accept · tab next · ctrl+d decline · esc cancel
+──────────────────────────────────────────────────────────────────────

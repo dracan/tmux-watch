@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/TmuxWatch.Tests/TmuxWatch.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/TmuxWatch.Calibration/TmuxWatch.Calibration.csproj" />
+  </Folder>
 </Solution>

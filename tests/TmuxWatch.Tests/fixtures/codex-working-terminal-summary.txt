@@ -1,0 +1,7 @@
+Synthetic foreground operation is running.
+
+◦ Working (7s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close
+
+› Ask Codex to do anything
+
+  model default · /synthetic/project

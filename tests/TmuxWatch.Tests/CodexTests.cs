@@ -23,6 +23,7 @@ public class CodexTests
     [InlineData("question-submit-all", PaneState.Waiting)]
     [InlineData("working", PaneState.Working)]
     [InlineData("working-queued", PaneState.Working)]
+    [InlineData("working-terminal-summary", PaneState.Working)]
     [InlineData("idle", PaneState.Idle)]
     [InlineData("idle-after-work", PaneState.Idle)]
     [InlineData("idle-stale-prompts", PaneState.Idle)]
@@ -37,6 +38,15 @@ public class CodexTests
     {
         var screen = $"{glyph} {label} ({elapsed} \u2022 esc to interrupt)\n" + Fixture("idle");
         Assert.Equal(PaneState.Working, Classifier.Classify(screen, false));
+    }
+
+    [Theory]
+    [InlineData("\u00b7 1 background terminal running")]
+    [InlineData("\u00b7 2 background terminals running \u00b7 /ps to view")]
+    public void Terminal_summary_requires_the_live_status_prefix(string suffix)
+    {
+        Assert.Equal(PaneState.Working, Classifier.Classify("\u25e6 Working (3s \u2022 esc to interrupt) " + suffix + "\n" + Fixture("idle"), false));
+        Assert.Equal(PaneState.Idle, Classifier.Classify(suffix + "\n" + Fixture("idle"), false));
     }
 
     [Theory]

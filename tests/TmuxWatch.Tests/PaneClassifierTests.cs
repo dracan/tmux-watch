@@ -40,6 +40,9 @@ public class PaneClassifierTests
     [Theory]
     [InlineData("waiting-command-approval.txt", PaneState.Waiting)]
     [InlineData("waiting-ask-user.txt", PaneState.Waiting)]
+    [InlineData("waiting-ask-question.txt", PaneState.Waiting)]
+    [InlineData("waiting-ask-question-freeform.txt", PaneState.Waiting)]
+    [InlineData("waiting-ask-question-multiple.txt", PaneState.Waiting)]
     [InlineData("working.txt", PaneState.Working)]
     [InlineData("working-action-label.txt", PaneState.Working)]
     [InlineData("idle.txt", PaneState.Idle)]
@@ -47,6 +50,24 @@ public class PaneClassifierTests
     {
         var state = Classifier.Classify(Fixture(fixture), dead: false);
         Assert.Equal(expected, state);
+    }
+
+    [Theory]
+    [InlineData("waiting-ask-question.txt")]
+    [InlineData("waiting-ask-question-freeform.txt")]
+    [InlineData("waiting-ask-question-multiple.txt")]
+    public void Copilot_question_panel_requires_live_boundaries_and_can_be_disabled(string fixture)
+    {
+        var form = Fixture(fixture);
+        Assert.Equal(PaneState.Waiting, Classifier.Classify(form, false));
+        Assert.NotEqual(PaneState.Waiting, Classifier.Classify("Copilot needs information.\nA quoted heading", false));
+        Assert.Equal(PaneState.Idle, Classifier.Classify(form + Fixture("idle.txt"), false));
+        Assert.NotEqual(PaneState.Waiting, Classifier.Classify(form + "\n" + new string('\u2500', 70) + "\n\u276f\n" + new string('\u2500', 70), false));
+        Assert.NotEqual(PaneState.Waiting, ClaudeClassifier.Classify(form, false));
+        Assert.NotEqual(PaneState.Waiting, new PaneClassifier(WatchConfig.CodexProfile()).Classify(form, false));
+        var profile = WatchConfig.CopilotProfile();
+        profile.WaitingPanelPattern = "";
+        Assert.Equal(PaneState.Unknown, new PaneClassifier(profile).Classify(form, false));
     }
 
     [Theory]

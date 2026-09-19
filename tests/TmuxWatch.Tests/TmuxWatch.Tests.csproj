@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TmuxWatch\TmuxWatch.csproj" />
+    <ProjectReference Include="..\..\tools\TmuxWatch.Calibration\TmuxWatch.Calibration.csproj" />
   </ItemGroup>
 
   <ItemGroup>

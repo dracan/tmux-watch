@@ -1,5 +1,8 @@
 # tmux-watch
 
+For live classifier checks after an agent UI upgrade, use the
+[agent calibration harness](tools/TmuxWatch.Calibration/README.md).
+
 A watcher that tells you which **coding-agent** sessions - **GitHub Copilot CLI**,
 **Claude Code**, and **Codex CLI** - running inside **tmux** panes need your attention, and lets
 you jump straight to them. It never types into a pane; watching is entirely

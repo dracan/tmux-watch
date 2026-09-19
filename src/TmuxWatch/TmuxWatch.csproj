@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="TmuxWatch.Tests" />
+    <InternalsVisibleTo Include="TmuxWatch.Calibration" />
   </ItemGroup>
 
   <ItemGroup>

@@ -28,6 +28,7 @@ public sealed class PaneClassifier
     private readonly int _statusLineCount;
     private readonly Regex _waitingCursor;
     private readonly Regex? _waitingChrome;
+    private readonly Regex? _waitingPanel;
     private readonly Regex? _workingLine;
     private readonly Regex? _workingSpinner;
     private readonly Regex _spinnerGlyph;
@@ -50,6 +51,7 @@ public sealed class PaneClassifier
         _statusLineCount = statusLineCount;
         _waitingCursor = profile.CompileWaitingCursor();
         _waitingChrome = profile.CompileWaitingChrome();
+        _waitingPanel = profile.CompileWaitingPanel();
         _workingLine = profile.CompileWorkingLine();
         _workingSpinner = profile.CompileWorkingSpinner();
         _spinnerGlyph = profile.CompileSpinnerGlyph();
@@ -125,6 +127,9 @@ public sealed class PaneClassifier
     /// </summary>
     private bool IsWaiting(List<string> statusLines, string statusText, int composer)
     {
+        if (_waitingPanel?.IsMatch(statusText) ?? false)
+            return true;
+
         for (var i = composer + 1; i < statusLines.Count; i++)
         {
             if (_waitingCursor.IsMatch(statusLines[i]) ||
