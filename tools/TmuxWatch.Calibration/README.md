@@ -4,6 +4,13 @@ Run real Claude Code, Codex, and GitHub Copilot CLI sessions in disposable tmux
 projects to detect UI drift. The executable reuses the production classifier and
 monitor. It also runs deterministic monitor checks using scrubbed fixtures.
 
+For an agent to handle the complete workflow, ask **"Refresh agent detection"**
+or **"Refresh Copilot detection"**. The repository's
+[refresh skill](../../.claude/skills/refresh-agent-detection/SKILL.md) runs the
+commands below, diagnoses the reports, repairs verified drift, and validates and
+delivers changes on main. You can also give it an existing report path. A clean
+run leaves tracked files unchanged; unavailable evidence is reported explicitly.
+
 Requirements: .NET 10, tmux, bash, git, Python 3, GNU timeout, and whichever agent
 CLIs you select. Helpers use only Python's standard library. Install and
 authenticate the agents yourself. Live runs consume your normal model usage.

@@ -1,6 +1,16 @@
 # tmux-watch
 
-For live classifier checks after an agent UI upgrade, use the
+After an agent CLI upgrade, ask your coding agent: **"Refresh agent detection."**
+The [refresh-agent-detection skill](.claude/skills/refresh-agent-detection/SKILL.md)
+runs the checks, investigates failures, fixes verified drift, validates, and
+commits/pushes on main. Name an agent to focus it, or supply a previous report.
+A clean run makes no tracked changes. It asks for help only when needed, such as
+installing a missing CLI or logging in.
+
+Explicit invocation: `$refresh-agent-detection` in Codex or
+`/refresh-agent-detection` in Claude Code. Copilot has the matching repository
+skill and prompt. Start a new agent session if the new skill is not discovered.
+For manual commands and coverage limits, see the
 [agent calibration harness](tools/TmuxWatch.Calibration/README.md).
 
 A watcher that tells you which **coding-agent** sessions - **GitHub Copilot CLI**,
