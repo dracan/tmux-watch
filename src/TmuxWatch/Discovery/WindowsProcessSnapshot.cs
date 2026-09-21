@@ -49,11 +49,10 @@ internal static class WindowsProcessSnapshot
             {
                 using var process = Process.GetProcessById(pid);
                 var startedAt = process.StartTime.ToUniversalTime().Ticks;
-                // Reject replacement processes created after the snapshot began and
-                // identities that changed between Toolhelp and the live process query.
-                if (startedAt > capturedAt || process.HasExited ||
-                    !string.Equals(process.ProcessName, Path.GetFileNameWithoutExtension(candidate.Command),
-                        StringComparison.OrdinalIgnoreCase))
+                // Reject replacement processes created after the snapshot began.
+                // Keep Toolhelp's launch name: an updater can rename a running binary,
+                // changing ProcessName without changing the process's identity.
+                if (startedAt > capturedAt || process.HasExited)
                     continue;
                 verified.Add(candidate with { StartedAt = startedAt });
                 foreach (var child in children[pid])

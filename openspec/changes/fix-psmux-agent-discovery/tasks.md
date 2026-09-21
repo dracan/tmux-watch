@@ -12,3 +12,9 @@
 
 - [x] 3.1 Document Windows discovery, activity support and the limits of process ownership.
 - [x] 3.2 Run focused regressions, full tests, build and OpenSpec validation; exercise the Windows adapter where available and record any validation limits.
+
+## 4. Follow-up: executable renamed during update
+
+- [x] 4.1 Reproduce the reported stable process identity with a renamed executable in a native Windows regression.
+- [x] 4.2 Preserve snapshot command identity across executable renames while retaining liveness and creation-time guards.
+- [x] 4.3 Validate the regression on Windows, run the full suite, and update the design and validation notes.

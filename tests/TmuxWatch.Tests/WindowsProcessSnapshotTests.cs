@@ -65,6 +65,71 @@ public class WindowsProcessSnapshotTests
         }
     }
 
+    [WindowsFact]
+    public async Task Native_discovery_keeps_the_owner_when_its_running_executable_is_renamed()
+    {
+        // Reproduce an updater moving a running binary aside. Only our disposable
+        // copy is renamed; neither cmd.exe nor an installed agent is modified.
+        var directory = Directory.CreateTempSubdirectory("tmux-watch-rename-").FullName;
+        var executable = Path.Combine(directory, "copilot.exe");
+        Process? child = null;
+        try
+        {
+            File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), executable);
+            var start = new ProcessStartInfo(executable)
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardInput = true, RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            start.ArgumentList.Add("/d");
+            start.ArgumentList.Add("/c");
+            start.ArgumentList.Add("echo ready&set /p hold=");
+            child = Process.Start(start)!;
+            Assert.Equal("ready", await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+            var startedAt = child.StartTime;
+            var tmux = new FakeTmuxClient();
+            var discovery = new PaneDiscovery(tmux, new WatchConfig(), "");
+            foreach (var command in new[] { "apphost", "tgrep" })
+            {
+                tmux.ListOutput = $"%test|test|0|0|{command}|0|||0|0|{child.Id}";
+                Assert.Equal("copilot", Assert.Single(discovery.DiscoverPanes().AgentPanes).AgentId);
+            }
+
+            File.Move(executable, executable + ".old-123-456");
+            using var renamed = Process.GetProcessById(child.Id);
+            Assert.False(renamed.HasExited);
+            Assert.Equal(startedAt, renamed.StartTime);
+            // A fresh Process instance is important: ProcessName can be cached.
+            Assert.Equal("copilot.exe.old-123-456", renamed.ProcessName);
+            foreach (var command in new[] { "apphost", "tgrep" })
+            {
+                tmux.ListOutput = $"%test|test|0|0|{command}|0|||0|0|{child.Id}";
+                var inventory = discovery.DiscoverPanes();
+                Assert.Equal("copilot", Assert.Single(inventory.AgentPanes).AgentId);
+                Assert.Empty(inventory.OtherPanes);
+            }
+
+            child.StandardInput.Close();
+            Assert.True(child.WaitForExit(5000));
+            Assert.Empty(discovery.DiscoverPanes().AgentPanes);
+            Assert.Empty(tmux.CapturedPanes);
+        }
+        finally
+        {
+            if (child is not null)
+            {
+                if (!child.HasExited)
+                {
+                    child.Kill(entireProcessTree: true);
+                    child.WaitForExit();
+                }
+                child.Dispose();
+            }
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private sealed class WindowsFactAttribute : FactAttribute
     {
         public WindowsFactAttribute()

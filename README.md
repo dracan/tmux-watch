@@ -80,6 +80,7 @@ live process tree rooted at `pane_pid`, using one read-only Windows process
 snapshot per enumeration. A single verified agent owner keeps the pane in the
 agent table while its tools run. Ownership is checked afresh each poll, stops at
 other pane roots, and rejects ambiguous owners and invalid process lifetimes.
+It also preserves ownership when an update renames an agent's running executable.
 The reported command is retained for diagnostics; attention states still come
 from the agent's screen. Calibration and normal monitoring share this discovery.
 

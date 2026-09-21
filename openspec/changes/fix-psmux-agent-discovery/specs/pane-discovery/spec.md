@@ -73,6 +73,11 @@ The system SHALL match each enumerated pane against an ordered set of configured
 - **WHEN** a pane runs a standalone helper or Copilot has exited leaving only an orphan helper
 - **THEN** it receives no process-based agent match
 
+#### Scenario: Running agent executable renamed during an update
+
+- **WHEN** Windows reports `apphost` or `tgrep` and a live Copilot owner's executable has been renamed while running, leaving its snapshot launch name as `copilot.exe` but changing .NET `ProcessName`
+- **THEN** discovery retains the Copilot match using the snapshot name, subject to the existing liveness and creation-time checks, and releases it after the process exits
+
 #### Scenario: Ownership boundaries and ambiguity
 
 - **WHEN** a pane contains another pane root or two independent agent owners
