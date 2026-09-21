@@ -1067,7 +1067,9 @@ public sealed class WatcherApp
         // The state column does double duty so the table stays narrow enough for a thin
         // dock: the classified state for an agent row, the foreground process for a
         // non-agent row.
-        table.AddColumn("State");
+        var hasOthers = rows.Any(row => !row.IsAgent);
+        var hasAgents = rows.Any(row => row.IsAgent) || rows.Count == 0;
+        table.AddColumn(hasOthers ? hasAgents ? "State / Cmd" : "Command" : "State");
         table.AddColumn("Window");
         // Path and Loc are wide-only columns, hidden by default so the table
         // fits a thin terminal split.
@@ -1076,7 +1078,9 @@ public sealed class WatcherApp
             table.AddColumn("Path");
             table.AddColumn("Loc");
         }
-        table.AddColumn("In state");
+        table.AddColumn(hasOthers ? hasAgents ? "Age" : "Quiet for" : "In state");
+        if (hasAgents && hasOthers)
+            table.Caption = new TableTitle("Age: agents = time in state; others = window inactivity; - = unavailable");
 
         var showAgentLabels = rows.Where(row => row.IsAgent)
             .Select(row => row.Pane.AgentId).Distinct(StringComparer.Ordinal).Take(2).Count() > 1;
@@ -1144,7 +1148,7 @@ public sealed class WatcherApp
                 ? FormatDuration(tracked.TimeInState(now))
                 : pane.TimeSinceActivity(now) is { } idleFor
                     ? $"[grey]{FormatDuration(idleFor)}[/]"
-                    : "[grey]—[/]");
+                    : "[grey]-[/]");
 
             var renderedCells = cells.Select(cell => (IRenderable)new Markup(cell)).ToArray();
             // Labels spend horizontal space, not an extra line per row in a thin split.

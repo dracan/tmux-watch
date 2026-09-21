@@ -27,9 +27,9 @@ public sealed record PaneInventory(
 
 /// <summary>
 /// Enumerates panes via a single read-only <c>lsp -a -F</c> call, parses them,
-/// and matches each to an agent profile (foreground command, with an optional
-/// session-name backstop). Server/CLI failures yield an empty set plus an error
-/// rather than throwing.
+/// and matches each to an agent profile (foreground command, Windows process
+/// ownership fallback, then optional session-name backstop). Server/CLI failures
+/// yield an empty set plus an error rather than throwing.
 /// </summary>
 public sealed class PaneDiscovery
 {
@@ -80,6 +80,7 @@ public sealed class PaneDiscovery
     private readonly ITmuxClient _tmux;
     private readonly IReadOnlyList<AgentProfile> _agents;
     private readonly string? _selfPaneId;
+    private readonly Func<IReadOnlySet<int>, ProcessSnapshot?> _captureProcesses;
 
     /// <param name="selfPaneId">
     /// The watcher's own pane id when it is itself running inside tmux, so that pane can
@@ -88,14 +89,19 @@ public sealed class PaneDiscovery
     /// normal case).
     /// </param>
     public PaneDiscovery(ITmuxClient tmux, WatchConfig cfg, string? selfPaneId = null)
+        : this(tmux, cfg, selfPaneId, WindowsProcessSnapshot.Capture) { }
+
+    internal PaneDiscovery(ITmuxClient tmux, WatchConfig cfg, string? selfPaneId,
+        Func<IReadOnlySet<int>, ProcessSnapshot?> captureProcesses)
     {
         _tmux = tmux;
+        _captureProcesses = captureProcesses;
         _agents = cfg.ResolveAgents();
         var self = selfPaneId ?? Environment.GetEnvironmentVariable("TMUX_PANE");
         _selfPaneId = string.IsNullOrWhiteSpace(self) ? null : self.Trim();
     }
 
-    /// <summary>All panes across all sessions (unfiltered).</summary>
+    /// <summary>All panes across all sessions, with resolved identities (unfiltered).</summary>
     public DiscoveryResult EnumerateAll()
     {
         var result = _tmux.ListPanesRaw(Format);
@@ -109,7 +115,19 @@ public sealed class PaneDiscovery
         foreach (var line in result.StdOut.Replace("\r\n", "\n").Split('\n'))
         {
             if (Parse(line) is { } pane)
-                panes.Add(pane);
+                panes.Add(_tmux.SupportsWindowActivity ? pane : pane with { WindowActivityUnix = 0 });
+        }
+
+        var roots = panes.Where(p => p.Pid > 0).Select(p => p.Pid).ToHashSet();
+        var processes = panes.Any(NeedsProcessFallback) ? _captureProcesses(roots) : null;
+        for (var i = 0; i < panes.Count; i++)
+        {
+            var pane = panes[i];
+            var profile = MatchCommand(pane.Command)
+                ?? (NeedsProcessFallback(pane) ? processes?.FindOwner(pane.Pid, roots, _agents) : null)
+                ?? MatchSession(pane.SessionName);
+            if (profile is not null)
+                panes[i] = pane with { AgentId = profile.Id };
         }
         return new DiscoveryResult(panes, null);
     }
@@ -140,8 +158,8 @@ public sealed class PaneDiscovery
         var others = new List<Pane>();
         foreach (var pane in all.Panes)
         {
-            if (MatchProfile(pane) is { } profile)
-                matched.Add(pane with { AgentId = profile.Id });
+            if (pane.AgentId.Length > 0)
+                matched.Add(pane);
             else if (!string.Equals(pane.Id, _selfPaneId, StringComparison.Ordinal))
                 others.Add(pane);
         }
@@ -149,23 +167,21 @@ public sealed class PaneDiscovery
     }
 
     /// <summary>
-    /// The first agent profile this pane belongs to, or null if none. Command match
-    /// is tried across all profiles first (cheap, from enumeration), then the
-    /// session-name backstop, so a correctly-named pane still matches even when its
-    /// foreground command is momentarily something else.
+    /// Resolve an enumerated pane's stamped identity without another process snapshot.
+    /// For a raw parsed pane, only command and session convention are available.
     /// </summary>
     public AgentProfile? MatchProfile(Pane pane)
-    {
-        foreach (var agent in _agents)
-            if (agent.MatchesCommand(pane.Command))
-                return agent;
+        => _agents.FirstOrDefault(a => a.Id == pane.AgentId)
+            ?? MatchCommand(pane.Command) ?? MatchSession(pane.SessionName);
 
-        foreach (var agent in _agents)
-            if (agent.MatchesSession(pane.SessionName))
-                return agent;
+    private AgentProfile? MatchCommand(string command) =>
+        _agents.FirstOrDefault(a => a.MatchesCommand(command));
 
-        return null;
-    }
+    private AgentProfile? MatchSession(string session) =>
+        _agents.FirstOrDefault(a => a.MatchesSession(session));
+
+    private bool NeedsProcessFallback(Pane pane) =>
+        !pane.Dead && pane.Pid > 0 && pane.Id != _selfPaneId && MatchCommand(pane.Command) is null;
 
     public static Pane? Parse(string line)
     {

@@ -74,6 +74,20 @@ The foreground-command match is extension-insensitive, so a Windows/psmux host
 (`pane_current_command` reports `copilot.exe`) is detected the same as the bare
 `copilot` command on Linux/macOS.
 
+On native Windows, psmux can report a child tool such as `tgrep` instead of the
+agent that owns the pane. When the command does not match, discovery checks the
+live process tree rooted at `pane_pid`, using one read-only Windows process
+snapshot per enumeration. A single verified agent owner keeps the pane in the
+agent table while its tools run. Ownership is checked afresh each poll, stops at
+other pane roots, and rejects ambiguous owners and invalid process lifetimes.
+The reported command is retained for diagnostics; attention states still come
+from the agent's screen. Calibration and normal monitoring share this discovery.
+
+This fallback identifies configured agent executables, not agents hidden behind
+a generic `node` process. Those still need a command match or the configured
+session-name convention. If Windows cannot verify a process, discovery falls
+back to command and naming matches. Unix hosts keep their existing discovery.
+
 4. Drives a per-pane state machine and **notifies once** when a pane *enters*
    WAITING, and once when a pane *enters* DONE (both edge-triggered, not every poll).
 
@@ -195,10 +209,20 @@ Panes that are *not* running a coding agent are listed in a separate **Other
 panes** table, so the watcher doubles as a jump target for the whole tmux server.
 These rows are inert inventory - never captured, classified, tracked, notified
 on, or able to move the pointer cue - and they ride along on the enumeration
-discovery already performs, so listing them costs no extra tmux call. Their state
-column shows the foreground process, and their timer shows time since the
-*window's* last activity (tmux has no pane-level equivalent, so that figure is
-shared across a split).
+discovery already performs, so listing them costs no extra tmux call. Their
+**Command** column shows the reported foreground process. **Quiet for** shows
+time since the *window's* last activity on supported hosts (the figure is shared
+across a split). It is not the age of the pane or its process.
+
+Native Windows/psmux displays `-` for this activity time. In psmux 3.3.8,
+`window_activity` actually returns session creation time, so even a new window
+can appear hours old. Activity remains unavailable for native Windows (including
+the `tmux.exe` alias) and explicitly named psmux clients until reliable support
+is verified. Agent **In state** timers are independent and continue working.
+
+Paused tables containing only non-agent rows use the same headings. A mixed
+paused table uses **State / Cmd** and **Age**, with a caption explaining the
+different ages. Agent-only tables retain **State** and **In state**.
 
 `c` controls whether **companion panes** - non-agent panes that share a window
 with an agent - appear in that table.

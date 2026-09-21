@@ -15,6 +15,9 @@ public sealed record TmuxResult(bool Started, int ExitCode, string StdOut, strin
 /// </summary>
 public interface ITmuxClient
 {
+    /// <summary>Whether window_activity is a real window activity timestamp.</summary>
+    bool SupportsWindowActivity => true;
+
     /// <summary>Raw output of a single <c>lsp -a -F</c> enumeration.</summary>
     TmuxResult ListPanesRaw(string format);
 

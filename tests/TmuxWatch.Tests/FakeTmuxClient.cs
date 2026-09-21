@@ -9,6 +9,7 @@ namespace TmuxWatch.Tests;
 /// </summary>
 public sealed class FakeTmuxClient : ITmuxClient
 {
+    public bool SupportsWindowActivity { get; set; } = true;
     public bool Started { get; set; } = true;
     public int ExitCode { get; set; }
     public string ErrorMessage { get; set; } = "";

@@ -28,6 +28,13 @@ public sealed class TmuxRunner : ITmuxClient
 
     public TmuxRunner(string executable) => _exe = executable;
 
+    // psmux 3.3.8 returns session creation time for window_activity. Native Windows
+    // includes its tmux.exe alias; explicit psmux paths are unsupported on any host.
+    // Keep unknown until a host/version with genuine window activity is verified.
+    public bool SupportsWindowActivity => !OperatingSystem.IsWindows() &&
+        !string.Equals(Path.GetFileNameWithoutExtension(_exe.Replace('\\', '/')),
+            "psmux", StringComparison.OrdinalIgnoreCase);
+
     public TmuxResult ListPanesRaw(string format) =>
         Run("lsp", "-a", "-F", format);
 
