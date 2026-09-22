@@ -13,6 +13,15 @@ skill and prompt. Start a new agent session if the new skill is not discovered.
 For manual commands and coverage limits, see the
 [agent calibration harness](tools/TmuxWatch.Calibration/README.md).
 
+To collect evidence on another machine, ask **"Dump agent diagnostics"**, or
+invoke `$dump-agent-diagnostics` in Codex or `/dump-agent-diagnostics` in Claude
+Code. The [repo-local skill](.claude/skills/dump-agent-diagnostics/SKILL.md) saves
+a Markdown report, screen samples, pane metadata, versions, and detector context
+under gitignored `.diagnostic-runs/`. Copilot has the matching skill and prompt.
+Name a pane or agent to narrow collection. Review the files for client material,
+then copy the whole run directory back for investigation. Collection is read-only
+and does not launch test sessions or change detection.
+
 A watcher that tells you which **coding-agent** sessions - **GitHub Copilot CLI**,
 **Claude Code**, and **Codex CLI** - running inside **tmux** panes need your attention, and lets
 you jump straight to them. It never types into a pane; watching is entirely

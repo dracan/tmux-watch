@@ -1,0 +1,30 @@
+{
+  "skill_name": "dump-agent-diagnostics",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Dump diagnostics from the client laptop. Pane %12 is running but the watcher says Unknown. Its status is \\u25ce Creating git worktrees \\u00b7 20.2 KiB esc interrupt. Inspect only that pane and prepare a portable handoff; do not fix anything.",
+      "expected_output": "A scoped report with raw samples, metadata, config/version uncertainty and receiving-machine handoff; no whole-server calibration under restricted scope.",
+      "files": [],
+      "assertions": [
+        "Report identifies %12 and distinguishes user-reported Unknown/expected Working from verified classification.",
+        "Three original synthetic captures preserve the supplied status text and whitespace.",
+        "Metadata includes pane width/height and config/running-version uncertainty.",
+        "Evidence collection respects pane-only scope and does not claim a whole-server calibration.",
+        "Portable relative links resolve and no fixes or uploads are claimed."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Dump agent diagnostics for me to take home. This machine has no usable tmux server and dotnet is missing. Save whatever useful evidence is available.",
+      "expected_output": "A partial diagnostic report with exact failures and no invented classifications or capture success.",
+      "files": [],
+      "assertions": [
+        "Report records the missing tmux server and dotnet errors.",
+        "Report claims zero successful captures and no verified classifications.",
+        "Available repository/config context is included with provenance and gaps.",
+        "Portable relative links resolve and no installations, fixes or uploads are claimed."
+      ]
+    }
+  ]
+}

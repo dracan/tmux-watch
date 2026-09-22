@@ -3,4 +3,6 @@ obj/
 *.user
 .vs/
 .calibration-runs/
+.diagnostic-runs/
+dump-agent-diagnostics-workspace/
 __pycache__/
