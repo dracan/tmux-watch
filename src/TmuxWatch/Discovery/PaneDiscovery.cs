@@ -71,8 +71,10 @@ public sealed class PaneDiscovery
     /// most likely to hold a '|', and this makes it exact rather than merely harmless.
     /// </para>
     /// </summary>
+    // The identity field includes the owning server PID for pause persistence.
+    // It remains one numeric-only field; old captures without the suffix still parse.
     public const string Format =
-        "#{pane_id}|#{window_index}|#{pane_index}|#{pane_dead}|#{window_active}|#{pane_active}|#{pane_pid}|#{window_activity}|#{pane_current_command}|#{session_name}|#{pane_current_path}|#{window_name}";
+        "#{pane_id};#{pid}|#{window_index}|#{pane_index}|#{pane_dead}|#{window_active}|#{pane_active}|#{pane_pid}|#{window_activity}|#{pane_current_command}|#{session_name}|#{pane_current_path}|#{window_name}";
 
     /// <summary>Number of fields <see cref="Format"/> emits.</summary>
     internal const int FieldCount = 12;
@@ -118,6 +120,12 @@ public sealed class PaneDiscovery
                 panes.Add(_tmux.SupportsWindowActivity ? pane : pane with { WindowActivityUnix = 0 });
         }
 
+        ResolveAgents(panes);
+        return new DiscoveryResult(panes, null);
+    }
+
+    internal void ResolveAgents(List<Pane> panes)
+    {
         var roots = panes.Where(p => p.Pid > 0).Select(p => p.Pid).ToHashSet();
         var processes = panes.Any(NeedsProcessFallback) ? _captureProcesses(roots) : null;
         for (var i = 0; i < panes.Count; i++)
@@ -129,7 +137,6 @@ public sealed class PaneDiscovery
             if (profile is not null)
                 panes[i] = pane with { AgentId = profile.Id };
         }
-        return new DiscoveryResult(panes, null);
     }
 
     /// <summary>
@@ -194,7 +201,9 @@ public sealed class PaneDiscovery
         if (parts.Length < 6)
             return null;
 
-        var id = parts[0].Trim();
+        var identity = parts[0].Trim().Split(';', 2);
+        var id = identity[0];
+        var serverPid = identity.Length == 2 && int.TryParse(identity[1], out var sp) ? sp : 0;
         if (id.Length == 0)
             return null;
 
@@ -217,6 +226,6 @@ public sealed class PaneDiscovery
         var currentPath = parts.Length > 10 ? parts[10].Trim() : "";
         var windowName = parts.Length > 11 ? parts[11].Trim() : "";
 
-        return new Pane(id, session, win, pane, command, dead, windowName, currentPath, windowActive, paneActive, pid, "", activity);
+        return new Pane(id, session, win, pane, command, dead, windowName, currentPath, windowActive, paneActive, pid, "", activity, serverPid);
     }
 }

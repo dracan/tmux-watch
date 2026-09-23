@@ -116,7 +116,9 @@ dotnet test                 # full suite
 | `1`-`9`, then shift+`A`-`Z` | Switch to that row directly (numbering is continuous across tables) |
 | `a` | Acknowledge the highlighted row when it is a DONE agent pane |
 | `n` | New window in the focused pane's session - prompts inline for a name, then jumps to it |
-| `p` | Pause / resume the highlighted row (works on non-agent rows as decluttering) |
+| `p` | Pause / resume the highlighted row (shared and persistent; non-agent rows supported) |
+| `e` | Save a workspace snapshot and copy its JSON to the clipboard |
+| `i` | Import a snapshot file or clipboard JSON through a modal prompt |
 | `o` | Show / hide the Other panes table (default: shown) |
 | `c` | Include / exclude companion panes - non-agent panes sharing a window with an agent (default: included) |
 | `w` | Wide mode: show the Path and Loc columns |
@@ -189,11 +191,13 @@ because rows are per-pane and a jump must land on the pane the row names rather 
 whichever pane that window last had active; it injects no input.
 
 **3. Lifecycle.** tmux-watch may create - and, if such keys are ever added, rename or
-destroy - windows and panes. Today the only lifecycle verb is `new-window` (the `n` key).
+destroy - windows and panes. The `n` key uses `new-window`. Explicit workspace imports additionally use
+`new-session`, `split-window`, `move-window`, and `select-layout` to recreate
+shells and their arrangement.
 Every lifecycle action is bound by three rules:
 
-- **Keystroke-driven only.** It happens in direct response to an explicit keypress naming
-  its target. Never on a timer, never from the poll loop, never as a side effect of
+- **Explicit invocation only.** It happens in direct response to an explicit keypress naming
+  its target or an explicit CLI workspace import. Never on a timer, never from the poll loop, never as a side effect of
   discovery or classification. This is what keeps a watcher a watcher: no future feature
   gets to reap dead panes on its own initiative.
 - **User text never reaches a command position.** `new-window` accepts a trailing shell
@@ -204,7 +208,13 @@ Every lifecycle action is bound by three rules:
   without one.
 
 The permitted set is therefore `lsp`, `capture-pane`, `display-message`, `switch-client`,
-`select-window`, `select-pane`, and `new-window`. Adding to it needs the same scrutiny:
+`select-window`, `select-pane`, `new-window`, `new-session`, `split-window`,
+`move-window`, and `select-layout`. Snapshot preflight also reads `list-sessions`.
+Import creation methods accept names, directories, and validated layout data only;
+no saved text reaches a shell-command position. `move-window` addresses only a
+newly created window to preserve its saved index. `select-layout` addresses only
+a newly created window after validating and remapping its layout. Import never
+runs from polling and never deletes partial results. Adding to this set needs the same scrutiny:
 which tier it belongs to, why the tier's rules are satisfied, and a note here.
 
 The **pointer signal** (`src/TmuxWatch/Pointer/`) recolours the OS mouse pointer
@@ -349,3 +359,12 @@ Claude's `/opsx:propose`, `/opsx:apply`, `/opsx:explore`, and `/opsx:archive` ma
 Codex's `$openspec-propose`, `$openspec-apply-change`, `$openspec-explore`, and
 `$openspec-archive-change`, respectively. Use the current agent's invocation syntax
 when suggesting a next step.
+
+## Workspace snapshots
+
+The workspace module exports metadata only, including panes hidden in the TUI.
+Imports create shells on explicit request and present manual resume guidance.
+Snapshot text is data; conversation identity remains unknown unless its current
+pane association is verified. Pause settings are shared and persistent, keyed by
+process lifetime and pane identity so reused IDs do not inherit old state.
+See `docs/planning/workspace-snapshot.md` for the confirmed design decisions.

@@ -7,8 +7,11 @@ using TmuxWatch.Notifications;
 using TmuxWatch.Pointer;
 using TmuxWatch.Tmux;
 using TmuxWatch.Tui;
+using TmuxWatch.Workspace;
 
-var options = CliOptions.Parse(args);
+CliOptions options;
+try { options = CliOptions.Parse(args); }
+catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
 if (options.ShowHelp)
 {
     CliOptions.PrintHelp();
@@ -20,6 +23,23 @@ if (options.IntervalSeconds is { } iv) cfg.PollIntervalSeconds = iv;
 
 var tmux = new TmuxRunner(cfg.TmuxExecutable);
 var discovery = new PaneDiscovery(tmux, cfg);
+var pauses = new PauseStore();
+var workspace = new WorkspaceService(tmux, cfg, pauses);
+if (options.Export || options.ImportPath is not null || options.ImportClipboard)
+{
+    WorkspaceResult result;
+    try
+    {
+        result = options.Export ? workspace.Export(options.ExportPath)
+            : options.ImportClipboard ? workspace.ImportClipboard()
+            : options.ImportPath == "-" ? workspace.ImportJson(Console.In.ReadToEnd())
+            : workspace.ImportFile(options.ImportPath!);
+    }
+    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+    { Console.Error.WriteLine(e.Message); return 1; }
+    Console.WriteLine(result.Message);
+    return result.Success ? 0 : 1;
+}
 
 if (options.Calibrate)
     return Calibrate(tmux, discovery, cfg);
@@ -46,7 +66,7 @@ if (options.Once)
     return 0;
 }
 
-new WatcherApp(monitor, tmux, cfg, pointer).Run(cts.Token);
+new WatcherApp(monitor, tmux, cfg, pointer, pauses, workspace).Run(cts.Token);
 return 0;
 
 static void PrintOnce(MonitorSnapshot snap)
@@ -93,7 +113,7 @@ static int Calibrate(TmuxRunner tmux, PaneDiscovery discovery, WatchConfig cfg)
     foreach (var pane in all.Panes)
     {
         var profile = discovery.MatchProfile(pane);
-        var cap = tmux.CapturePane(pane.Id);
+        var cap = tmux.CapturePane(pane.Target);
         var state = profile is not null && classifiers.TryGetValue(profile.Id, out var classifier)
             ? classifier.Classify(cap.Ok ? cap.StdOut : null, pane.Dead)
             : PaneState.Dead;
@@ -123,6 +143,10 @@ sealed class CliOptions
     public bool Calibrate { get; private set; }
     public bool Once { get; private set; }
     public bool ShowHelp { get; private set; }
+    public bool Export { get; private set; }
+    public string? ExportPath { get; private set; }
+    public string? ImportPath { get; private set; }
+    public bool ImportClipboard { get; private set; }
 
     public static CliOptions Parse(string[] args)
     {
@@ -135,11 +159,22 @@ sealed class CliOptions
                 case "--interval":
                     if (double.TryParse(Next(args, ref i), out var s)) o.IntervalSeconds = s;
                     break;
+                case "--export":
+                    o.Export = true;
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith('-')) o.ExportPath = args[++i];
+                    break;
+                case "--import":
+                    o.ImportPath = Next(args, ref i) ?? throw new ArgumentException("--import requires a file path or - for stdin.");
+                    if (o.ImportPath.StartsWith("--")) throw new ArgumentException("--import requires a file path or - for stdin.");
+                    break;
+                case "--import-clipboard": o.ImportClipboard = true; break;
                 case "--calibrate": o.Calibrate = true; break;
                 case "--once": o.Once = true; break;
                 case "-h" or "--help": o.ShowHelp = true; break;
             }
         }
+        var actions = new[] { o.Export, o.ImportPath is not null, o.ImportClipboard, o.Once, o.Calibrate };
+        if (actions.Count(a => a) > 1) throw new ArgumentException("Choose one of export, import, once, or calibrate.");
         return o;
     }
 
@@ -154,6 +189,9 @@ sealed class CliOptions
         AnsiConsole.WriteLine("  --interval <sec>    Poll interval override");
         AnsiConsole.WriteLine("  --calibrate         Print classification of all live panes and exit");
         AnsiConsole.WriteLine("  --once              Print one classification snapshot and exit");
+        AnsiConsole.WriteLine("  --export [path]     Save workspace JSON and copy it to the clipboard");
+        AnsiConsole.WriteLine("  --import <path|->   Restore shells from a file or JSON on stdin");
+        AnsiConsole.WriteLine("  --import-clipboard Restore shells from clipboard JSON");
         AnsiConsole.WriteLine("  -h, --help          Show this help");
     }
 }

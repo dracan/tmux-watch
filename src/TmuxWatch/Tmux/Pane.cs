@@ -18,7 +18,8 @@ public sealed record Pane(
     bool PaneActive = false,
     int Pid = 0,
     string AgentId = "",
-    long WindowActivityUnix = 0)
+    long WindowActivityUnix = 0,
+    int ServerPid = 0)
 {
     // AgentId is empty as parsed from tmux; discovery stamps it with the id of the
     // matched agent profile (e.g. "copilot", "claude").
@@ -27,6 +28,12 @@ public sealed record Pane(
     // window-granular - tmux 3.4 exposes no pane-level equivalent - so every pane in a
     // split reports the same figure. 0 means "unknown" (absent, unparseable, or a host
     // that does not supply it).
+
+    /// <summary>Psmux assigns pane IDs per session process, not across its whole inventory.</summary>
+    public string Key => ServerPid > 0 ? $"{ServerPid}/{Id}" : Id;
+
+    /// <summary>Use a fully qualified index on psmux; a raw pane ID can name another session.</summary>
+    public string Target => OperatingSystem.IsWindows() && ServerPid > 0 ? Location : Id;
 
     /// <summary>Target usable with tmux -t for window selection, e.g. "work:1".</summary>
     public string WindowTarget => $"{SessionName}:{WindowIndex}";

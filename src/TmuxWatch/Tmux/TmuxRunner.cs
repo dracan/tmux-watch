@@ -9,7 +9,7 @@ namespace TmuxWatch.Tmux;
 /// (avoids quoting issues). A verb whitelist enforces the inviolable tier of the
 /// boundary in AGENTS.md: input-injecting verbs such as <c>send-keys</c> can never be
 /// invoked, so a pane's content stays read-only. The whitelist also carries the focus
-/// verbs and the one lifecycle verb (<c>new-window</c>) the watcher may use.
+/// verbs and bounded lifecycle verbs for explicit creation and workspace import.
 /// </summary>
 public sealed class TmuxRunner : ITmuxClient
 {
@@ -22,11 +22,20 @@ public sealed class TmuxRunner : ITmuxClient
         "select-window", "selectw",
         "select-pane", "selectp",
         "new-window", "neww",
+        "list-sessions", "new-session", "split-window", "select-layout", "move-window",
     };
 
     private readonly string _exe;
+    private readonly string[] _prefix;
+    private readonly Func<string[], TmuxResult>? _execute;
 
-    public TmuxRunner(string executable) => _exe = executable;
+    public TmuxRunner(string executable, string? serverName = null)
+    {
+        _exe = executable;
+        _prefix = serverName is null ? [] : ["-L", serverName];
+    }
+
+    internal TmuxRunner(Func<string[], TmuxResult> execute) : this("test-multiplexer") => _execute = execute;
 
     // psmux 3.3.8 returns session creation time for window_activity. Native Windows
     // includes its tmux.exe alias; explicit psmux paths are unsupported on any host.
@@ -97,6 +106,8 @@ public sealed class TmuxRunner : ITmuxClient
             throw new InvalidOperationException(
                 $"tmux verb '{verb}' is not permitted; tmux-watch is read-only toward panes.");
 
+        if (_execute is not null) return _execute(args);
+
         var psi = new ProcessStartInfo
         {
             FileName = _exe,
@@ -107,7 +118,7 @@ public sealed class TmuxRunner : ITmuxClient
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
-        foreach (var a in args)
+        foreach (var a in _prefix.Concat(args))
             psi.ArgumentList.Add(a);
 
         try
@@ -116,10 +127,16 @@ public sealed class TmuxRunner : ITmuxClient
             if (proc is null)
                 return TmuxResult.NotStarted($"Failed to start '{_exe}'.");
 
-            var stdout = proc.StandardOutput.ReadToEnd();
-            var stderr = proc.StandardError.ReadToEnd();
-            proc.WaitForExit();
-            return new TmuxResult(true, proc.ExitCode, stdout, stderr);
+            var stdout = proc.StandardOutput.ReadToEndAsync();
+            var stderr = proc.StandardError.ReadToEndAsync();
+            var done = Task.WhenAll(stdout, stderr, proc.WaitForExitAsync());
+            if (!done.Wait(TimeSpan.FromSeconds(15)))
+            {
+                // Kill only the hung client, never its server or newly created shells.
+                if (!proc.HasExited) proc.Kill();
+                return new TmuxResult(true, -1, "", $"Multiplexer command '{verb}' timed out; any created resources were retained.");
+            }
+            return new TmuxResult(true, proc.ExitCode, stdout.Result, stderr.Result);
         }
         catch (Win32Exception ex)
         {

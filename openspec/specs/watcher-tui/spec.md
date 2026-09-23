@@ -125,7 +125,7 @@ injects no input.
 
 **Lifecycle.** The system MAY create - and in future rename or destroy - windows and
 panes. Every such action SHALL be taken only in direct response to an explicit keystroke
-naming its target. No lifecycle action SHALL ever be taken automatically, on a timer, or
+naming its target or an explicit CLI workspace import. No lifecycle action SHALL ever be taken automatically, on a timer, or
 as any part of the poll loop. User-entered text SHALL NEVER be placed in a command
 position of a lifecycle verb.
 
@@ -152,12 +152,12 @@ position of a lifecycle verb.
 #### Scenario: Polling never changes lifecycle
 
 - **WHEN** the watcher polls, reclassifies panes, and finds dead or vanished panes
-- **THEN** it creates, renames, or destroys nothing; the only lifecycle changes ever made are those a keystroke asked for
+- **THEN** it creates, renames, or destroys nothing; lifecycle changes occur only for explicit keys or CLI imports
 
 #### Scenario: User text is never a command
 
 - **WHEN** a lifecycle verb is invoked with user-entered text
-- **THEN** that text occupies only a name argument, never a command position
+- **THEN** that text occupies only a name, directory, or validated structural argument, never a command position
 
 ### Requirement: Acknowledge a DONE pane without switching
 
@@ -380,6 +380,13 @@ rows and the foreground process for non-agent rows.
 
 - **WHEN** the highlighted row is a paused non-agent pane and the user presses `p`
 - **THEN** the row returns to the Other panes table in its multiplexer-ordered position
+
+Pause settings SHALL persist across watcher restarts and be shared between instances
+observing the same panes. Visibility toggles remain per-run.
+
+#### Scenario: Pause survives restart
+- **WHEN** a pane is paused and the watcher restarts while the pane remains alive
+- **THEN** it remains paused
 
 ### Requirement: One-shot output includes non-agent panes
 
@@ -633,3 +640,16 @@ once.
 - **WHEN** `ackHoldSeconds` is `0` and the user acknowledges a DONE pane
 - **THEN** the row is reordered by its acknowledged state in the same frame
 
+### Requirement: Workspace snapshot keys
+
+The TUI SHALL offer e to export and i to open a modal import prompt accepting a
+file path or clipboard input. Results SHALL show the saved snapshot or restore
+report location and failures. Prompt input SHALL not activate command/address keys.
+
+#### Scenario: Export key
+- **WHEN** the user presses e outside a prompt
+- **THEN** the workspace is saved and copied, with the result shown in the view
+
+#### Scenario: Import cancelled
+- **WHEN** the user opens import and presses escape
+- **THEN** the prompt closes and no lifecycle action runs

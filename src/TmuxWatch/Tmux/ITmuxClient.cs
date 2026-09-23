@@ -41,7 +41,7 @@ public interface ITmuxClient
     /// <summary>
     /// Create a window in <paramref name="sessionName"/>, detached, so no client moves;
     /// the caller jumps to it separately through the focus verbs. This is the watcher's
-    /// one lifecycle verb and may only be reached from an explicit keystroke, never from
+    /// interactive new-window action and may only be reached from an explicit keystroke, never from
     /// the poll loop.
     /// <para>
     /// <paramref name="windowName"/> is user-entered text and MUST be used only as the

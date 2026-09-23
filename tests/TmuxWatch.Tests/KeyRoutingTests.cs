@@ -28,6 +28,16 @@ public class KeyRoutingTests
     private static WatcherApp.KeyAction Open(ConsoleKeyInfo key) =>
         WatcherApp.ClassifyKey(key, promptOpen: true);
 
+    [Theory]
+    [InlineData('e')]
+    [InlineData('i')]
+    public void Workspace_keys_are_commands_only_outside_prompts(char key)
+    {
+        var input = new ConsoleKeyInfo(key, ConsoleKey.NoName, false, false, false);
+        Assert.Equal(key == 'e' ? WatcherApp.KeyAction.ExportWorkspace : WatcherApp.KeyAction.ImportWorkspace, WatcherApp.ClassifyKey(input, false));
+        Assert.Equal(WatcherApp.KeyAction.PromptInput, WatcherApp.ClassifyKey(input, true));
+    }
+
     [Fact]
     public void Commands_route_normally_while_the_prompt_is_closed()
     {

@@ -103,12 +103,12 @@ back to command and naming matches. Unix hosts keep their existing discovery.
 
 > **Read-only guarantee:** tmux-watch never sends keystrokes to a pane. A pane's
 > *content* is read-only, permanently - `send-keys` (and anything like it) cannot
-> be invoked. The tmux access layer whitelists only `lsp`, `capture-pane`,
-> `display-message`, `switch-client`, `select-window`, `select-pane`, and
-> `new-window`. Beyond reading, those change only *focus* - which session and
-> window the watcher's own client is on, and which pane is active within a
-> window - plus, on the `n` key alone, creating a new window. Nothing is ever
-> created, renamed, or destroyed by the poll loop; only by a keystroke.
+> be invoked. The access layer permits read-only inspection, focus changes, and
+> explicitly requested window creation or workspace import. Import creates shells
+> and restores their arrangement; it never executes saved resume commands. Nothing
+> is created, renamed, or destroyed by polling, and partial imports are never
+> automatically deleted. The exact lifecycle boundary is documented in AGENTS.md.
+
 
 ## Prerequisites
 
@@ -180,7 +180,9 @@ directly.
 | `1`-`9`, then shift+`A`-`Z` | Switch to that row directly (numbering is continuous across tables) |
 | `a` | Acknowledge the highlighted row when it is a DONE agent pane (clears it back to IDLE without switching) |
 | `n` | New window in the focused pane's session - prompts for a name, then jumps to it |
-| `p` | Pause / resume the highlighted row |
+| `p` | Pause / resume the highlighted row (shared and persistent) |
+| `e` | Save the workspace and copy its JSON to the clipboard |
+| `i` | Import a workspace file; submit an empty path to use the clipboard |
 | `o` | Show / hide the Other panes table (default: shown) |
 | `c` | Include / exclude companion panes (default: included) |
 | `w` | Wide mode: show the Path and Loc columns |
@@ -210,8 +212,62 @@ Pausing parks a pane in a separate **Paused** table below the main list, so the
 top table stays focused on the sessions you are actively working on. Bring it
 back by highlighting it and pressing `p` again.
 
-The `o`, `c` and `w` toggles and the paused set are all per-run: they reset to
-their defaults on each launch and have no config key.
+The `o`, `c` and `w` toggles reset on each launch. Pause settings are shared
+between watchers of the same panes and survive watcher restarts. Recycled pane
+IDs do not inherit old settings; imports transfer them onto the new panes.
+
+### Save a workspace before reboot
+
+Press `e`, or run:
+
+```sh
+./go.sh --export
+./go.sh --export /path/to/workspace.json
+```
+
+Export includes every pane, even ones hidden or paused in the TUI, with session
+and window names, split layouts, directories, agent types, and paused settings.
+It saves readable JSON before copying the identical document to the clipboard.
+If no clipboard helper works, the file is still saved and its path is reported.
+An explicitly chosen existing file is not overwritten. Export also reports known
+restore blockers, so you can resolve them before rebooting.
+
+After reboot, run the watcher outside the sessions you want to restore, then
+press `i` and enter the saved file path (or leave it empty for clipboard input).
+Terminal commands also work:
+
+```sh
+./go.sh --import /path/to/workspace.json
+./go.sh --import-clipboard
+cat /path/to/workspace.json | ./go.sh --import -
+```
+
+Use the same options with `go.ps1` on Windows/psmux. Import recreates shells in
+the saved directories, with the saved split arrangement and paused settings.
+Pane sizes may scale or round. It provides manual resume guidance in a saved
+report; it does not restart agents, dev servers, or other programs.
+
+Conversation IDs are explicitly **unknown** until an agent/version has a verified
+read-only resolver for its selected conversation. This release does not claim a
+verified resolver for Copilot, Claude Code, or Codex. It installs no hooks and
+reads no transcripts. A known UUID supplied in an edited snapshot produces manual
+resume guidance for the corresponding agent; it is never executed by the watcher.
+Agent conversation storage itself is not backed up by this feature.
+
+Import stops before creation if names conflict, directories are missing, or the
+snapshot has unsupported structure. Psmux requires contiguous window indexes
+starting at zero. Linked or zoomed windows are currently
+unsupported for import: unzoom before exporting, and restore linked windows
+manually. Names and paths containing control characters, semicolons, or tmux
+format expressions are rejected. If creation fails after preflight, completed
+resources remain and the report explains the failure. Resolve those sessions
+before retrying, because a repeated import will report the name conflict.
+
+Default snapshots and restore reports live under `tmux-watch` in the user's local
+application-data directory (`~/.local/share` on Linux, `%LOCALAPPDATA%` on Windows).
+Pause records live alongside them. Keep the snapshot file somewhere that survives
+your reboot; clipboard contents alone are not a durable backup. This is intended
+for restoring on the same machine, not translating paths between Windows and Unix.
 
 ### Other panes
 

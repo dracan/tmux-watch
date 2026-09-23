@@ -82,11 +82,11 @@ public sealed class AttentionMonitor
         // never captured, classified, or tracked - it is passed straight to the snapshot.
         foreach (var pane in discovered.AgentPanes)
         {
-            seen.Add(pane.Id);
+            seen.Add(pane.Key);
 
             // capture is read-only; a failed capture leaves classification to
             // liveness facts (e.g. Unknown), never crashes the loop.
-            var capture = _tmux.CapturePane(pane.Id);
+            var capture = _tmux.CapturePane(pane.Target);
             var verdict = _classifiers.TryGetValue(pane.AgentId, out var classifier)
                 ? classifier.Inspect(capture.Ok ? capture.StdOut : null, pane.Dead)
                 : Classification.Of(PaneState.Unknown);
@@ -97,13 +97,13 @@ public sealed class AttentionMonitor
             // window and ids restarted at %0). Its tracked history belongs to the old
             // pane - treating the newcomer as a continuation could stitch a stale
             // WORKING into a false DONE - so it re-enters as first sight below.
-            if (!_tracked.TryGetValue(pane.Id, out var tracked) ||
+            if (!_tracked.TryGetValue(pane.Key, out var tracked) ||
                 tracked.Pane.Pid != pane.Pid)
             {
                 // First sight has no history, so a pane that is already idle cannot be
                 // a just-finished turn - it stays IDLE (never promoted to DONE).
                 tracked = new TrackedPane { Pane = pane, State = classified, EnteredAt = now };
-                _tracked[pane.Id] = tracked;
+                _tracked[pane.Key] = tracked;
                 RaiseIfAttention(tracked, PaneState.Unknown, classified, events);
                 continue;
             }

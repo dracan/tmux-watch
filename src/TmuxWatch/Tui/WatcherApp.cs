@@ -7,6 +7,7 @@ using TmuxWatch.Detection;
 using TmuxWatch.Monitor;
 using TmuxWatch.Pointer;
 using TmuxWatch.Tmux;
+using TmuxWatch.Workspace;
 
 namespace TmuxWatch.Tui;
 
@@ -17,7 +18,7 @@ namespace TmuxWatch.Tui;
 /// </summary>
 internal sealed record WatchRow(Pane Pane, TrackedPaneView? Agent)
 {
-    public string Id => Pane.Id;
+    public string Id => Pane.Key;
     public bool IsAgent => Agent is not null;
 }
 
@@ -67,6 +68,10 @@ public sealed class WatcherApp
     private readonly ITmuxClient _tmux;
     private readonly WatchConfig _cfg;
     private readonly IPointerSignal _pointer;
+    private readonly PauseStore? _pauseStore;
+    private readonly WorkspaceService? _workspace;
+    private bool _importPrompt;
+    private string? _workspaceMessage;
 
     // Pane Ids the user has parked. Tracked here (not in the monitor) because it
     // is a view-only concern, independent of a pane's classified state. Holds both
@@ -105,12 +110,15 @@ public sealed class WatcherApp
     private LineEditor? _prompt;
     private string _promptSession = "";
 
-    public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg, IPointerSignal? pointer = null)
+    public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg, IPointerSignal? pointer = null,
+        PauseStore? pauseStore = null, WorkspaceService? workspace = null)
     {
         _monitor = monitor;
         _tmux = tmux;
         _cfg = cfg;
         _pointer = pointer ?? new NullPointerSignal();
+        _pauseStore = pauseStore;
+        _workspace = workspace;
     }
 
     /// <summary>Mutable per-frame state shared between the poll loop and key handling.</summary>
@@ -137,7 +145,7 @@ public sealed class WatcherApp
         var anyDone = false;
         foreach (var p in panes)
         {
-            if (pausedIds.Contains(p.Pane.Id))
+            if (pausedIds.Contains(p.Pane.Key))
                 continue;
             if (p.State == PaneState.Waiting)
                 return PointerState.Waiting;   // red wins; no need to look further
@@ -204,13 +212,14 @@ public sealed class WatcherApp
                         frame.Error = snapshot.Error;
                         frame.AgentViews = snapshot.Panes.ToList();
                         frame.OtherPanes = snapshot.OtherPanes.ToList();
+                        RefreshPauses(frame);
 
                         // The only place a hold is released. Doing it here rather than in
                         // Rebuild is what ties the release to a poll: a row that has to
                         // move does so alongside news from tmux, never on a keystroke.
                         ExpireHolds(
                             _ackHolds,
-                            frame.AgentViews.Select(v => v.Pane.Id),
+                            frame.AgentViews.Select(v => v.Pane.Key),
                             DateTimeOffset.UtcNow);
 
                         Rebuild(frame);
@@ -454,6 +463,8 @@ public sealed class WatcherApp
         ToggleCompanions,
         AcknowledgeRow,
         OpenNewWindowPrompt,
+        ExportWorkspace,
+        ImportWorkspace,
     }
 
     /// <summary>
@@ -490,6 +501,8 @@ public sealed class WatcherApp
             'c' => KeyAction.ToggleCompanions,
             'a' => KeyAction.AcknowledgeRow,
             'n' => KeyAction.OpenNewWindowPrompt,
+            'e' => KeyAction.ExportWorkspace,
+            'i' => KeyAction.ImportWorkspace,
             _ => IndexForAddressKey(key.KeyChar) >= 0 ? KeyAction.AddressRow : KeyAction.Ignore,
         };
     }
@@ -552,7 +565,7 @@ public sealed class WatcherApp
                             // A non-agent row has no cue, so this is purely decluttering.
                             // Passing the holds is what lets a paused row move at once:
                             // TogglePause releases its hold. See TogglePause.
-                            if (TogglePause(_paused, HighlightedRow(frame)?.Id, _ackHolds))
+                            if (PauseHighlighted(frame))
                             {
                                 Rebuild(frame);
                                 Render(frame, ctx);
@@ -602,6 +615,25 @@ public sealed class WatcherApp
                             }
                             break;
 
+                        case KeyAction.ExportWorkspace:
+                            if (_workspace is not null)
+                            {
+                                _workspaceMessage = "Exporting workspace...";
+                                Render(frame, ctx);
+                                _workspaceMessage = _workspace.Export().Message;
+                                Render(frame, ctx);
+                            }
+                            break;
+
+                        case KeyAction.ImportWorkspace:
+                            if (_workspace is not null)
+                            {
+                                _importPrompt = true;
+                                _prompt = LineEditor.Empty;
+                                Render(frame, ctx);
+                            }
+                            break;
+
                         case KeyAction.OpenNewWindowPrompt:
                             // Open the name prompt against the session resolved right now.
                             // Nothing is created until submit, and nothing at all happens
@@ -643,13 +675,24 @@ public sealed class WatcherApp
     {
         var (editor, outcome) = _prompt!.Value.Apply(key);
         var session = _promptSession;
+        var importing = _importPrompt;
 
         switch (outcome)
         {
             case LineEditorOutcome.Submit:
                 var name = editor.Text.Trim();
                 ClosePrompt();
-                CreateWindow(session, name, frame, ctx);
+                if (importing && _workspace is not null)
+                {
+                    _workspaceMessage = "Restoring workspace...";
+                    Render(frame, ctx);
+                    var result = name.Length == 0 ? _workspace.ImportClipboard()
+                        : name.StartsWith('{') ? _workspace.ImportJson(name) : _workspace.ImportFile(name);
+                    _workspaceMessage = result.Path is null ? result.Message
+                        : $"{(result.Success ? "Restore complete" : "Restore stopped; check report")}: {result.Path}";
+                    Render(frame, ctx);
+                }
+                else CreateWindow(session, name, frame, ctx);
                 return false;
 
             case LineEditorOutcome.Cancel:
@@ -667,6 +710,7 @@ public sealed class WatcherApp
     {
         _prompt = null;
         _promptSession = "";
+        _importPrompt = false;
     }
 
     /// <summary>
@@ -857,7 +901,7 @@ public sealed class WatcherApp
         return pane with
         {
             WindowActive = pane.WindowIndex == target.WindowIndex,
-            PaneActive = pane.Id == target.Id,
+            PaneActive = pane.Key == target.Key,
         };
     }
 
@@ -871,7 +915,7 @@ public sealed class WatcherApp
         for (var i = 0; i < ordered.Count; i++)
         {
             var view = ordered[i];
-            if (view.Pane.Id == paneId && view.State == PaneState.Done)
+            if (view.Pane.Key == paneId && view.State == PaneState.Done)
                 ordered[i] = view with { State = PaneState.Idle, AttentionOutstanding = false };
         }
     }
@@ -895,7 +939,7 @@ public sealed class WatcherApp
         if (holdSeconds <= 0)
             return;
 
-        holds[preAck.Pane.Id] = new AckHold(
+        holds[preAck.Pane.Key] = new AckHold(
             Priority(preAck.State), preAck.EnteredAt, now + TimeSpan.FromSeconds(holdSeconds));
     }
 
@@ -936,7 +980,7 @@ public sealed class WatcherApp
     {
         tmux.SwitchClient(pane.SessionName);
         tmux.SelectWindow(pane.WindowTarget);
-        tmux.SelectPane(pane.Id);
+        tmux.SelectPane(pane.Target);
     }
 
     /// <summary>
@@ -956,7 +1000,7 @@ public sealed class WatcherApp
         IReadOnlySet<string> pausedIds,
         IReadOnlyDictionary<string, AckHold>? ackHolds = null) =>
         panes
-            .OrderBy(p => pausedIds.Contains(p.Pane.Id) ? 1 : 0)
+            .OrderBy(p => pausedIds.Contains(p.Pane.Key) ? 1 : 0)
             .ThenBy(p => Held(ackHolds, p) is { } h ? h.Priority : Priority(p.State))
             .ThenByDescending(p => Held(ackHolds, p) is { } h ? h.EnteredAt : p.EnteredAt)
             .ToList();
@@ -964,7 +1008,7 @@ public sealed class WatcherApp
     /// <summary>The hold covering this pane, or null when it is free to sort normally.</summary>
     private static AckHold? Held(
         IReadOnlyDictionary<string, AckHold>? ackHolds, TrackedPaneView pane) =>
-        ackHolds is not null && ackHolds.TryGetValue(pane.Pane.Id, out var hold) ? hold : null;
+        ackHolds is not null && ackHolds.TryGetValue(pane.Pane.Key, out var hold) ? hold : null;
 
     /// <summary>
     /// Attention-first ordering, shared by the live tables and the one-shot output so the
@@ -1022,7 +1066,14 @@ public sealed class WatcherApp
         // The prompt rides below the tables inside the same live view, so the tables stay
         // on screen and keep refreshing while the user types.
         if (_prompt is { } editor)
-            parts.Add(BuildPromptLine(editor, _promptSession));
+            parts.Add(_importPrompt ? new Markup(
+                "[yellow]Import workspace[/] [grey]file path (empty = clipboard) >[/] " +
+                $"{Markup.Escape(editor.Before)}[invert]{Caret(editor)}[/]{Markup.Escape(CaretTail(editor))} " +
+                "[grey]enter = import | esc = cancel[/]") : BuildPromptLine(editor, _promptSession));
+        if (_workspace is not null)
+            parts.Add(new Markup("[grey]e = export workspace | i = import workspace[/]"));
+        if (_workspaceMessage is not null)
+            parts.Add(new Markup(Markup.Escape(_workspaceMessage)));
 
         return parts.Count == 1 ? main : new Rows(parts);
     }
@@ -1038,6 +1089,43 @@ public sealed class WatcherApp
             $"[grey]name ›[/] {Markup.Escape(editor.Before)}[invert]{Caret(editor)}[/]" +
             $"{Markup.Escape(CaretTail(editor))}   " +
             "[grey]enter = create · esc = cancel[/]");
+
+    private void RefreshPauses(FrameState frame)
+    {
+        if (_pauseStore is null || frame.Error is not null) return;
+        try
+        {
+            var paused = frame.AgentViews.Select(v => v.Pane).Concat(frame.OtherPanes)
+                .Where(_pauseStore.IsPaused).Select(p => p.Key).ToHashSet();
+            _paused.Clear();
+            _paused.UnionWith(paused);
+        }
+        catch (Exception e) when (WorkspaceService.Expected(e))
+        { frame.Error = "Pause state: " + e.Message; }
+    }
+
+    private bool PauseHighlighted(FrameState frame)
+    {
+        var row = HighlightedRow(frame);
+        if (row is null) return false;
+        try
+        {
+            if (_pauseStore is not null)
+            {
+                var paused = !_pauseStore.IsPaused(row.Pane);
+                _pauseStore.Set(row.Pane, paused);
+                if (paused) _paused.Add(row.Id); else _paused.Remove(row.Id);
+                _ackHolds.Remove(row.Id);
+                return true;
+            }
+            return TogglePause(_paused, row.Id, _ackHolds);
+        }
+        catch (Exception e) when (WorkspaceService.Expected(e))
+        {
+            _workspaceMessage = "Pause not saved: " + e.Message;
+            return true;
+        }
+    }
 
     /// <summary>The character sitting under the cursor, or a space at end of line.</summary>
     private static string Caret(LineEditor editor) =>
@@ -1105,7 +1193,7 @@ public sealed class WatcherApp
                 windowCell = $"[grey]{Markup.Escape(label)}[/] {windowCell}";
             }
 
-            var address = number.TryGetValue(pane.Id, out var index) ? AddressKey(index) : "";
+            var address = number.TryGetValue(pane.Key, out var index) ? AddressKey(index) : "";
             var addressCell = address.Length == 0 ? "·" : address;
             // The focus marker shares the number column rather than taking a
             // dedicated one, keeping the table narrow for thin splits. The highlight
@@ -1126,7 +1214,7 @@ public sealed class WatcherApp
             // flush against it, and the solid bar does not.
             if (focused)
                 addressCell = $"[yellow]►[/] {addressCell}";
-            if (string.Equals(pane.Id, highlightedId, StringComparison.Ordinal))
+            if (string.Equals(pane.Key, highlightedId, StringComparison.Ordinal))
                 addressCell = $"[grey]▌[/]{addressCell}";
 
             var cells = new List<string>
