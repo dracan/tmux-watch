@@ -48,12 +48,14 @@ public class WorkspaceIntegrationTests
         string PaneTarget(string id) => backend.PaneTarget(source + ":0", id);
         try
         {
-            var id1 = Ok(tmux.Run("new-session", "-d", "-s", source, "-n", "build | watch",
+            // Psmux 3.3.8 cannot resolve pane targets in a window whose name contains '|'.
+            var id1 = Ok(tmux.Run("new-session", "-d", "-s", source, "-n", OperatingSystem.IsWindows() ? "build: watch" : "build | watch",
                 "-c", cwd1, "-x", "120", "-y", "40", "-P", "-F", "#{pane_id}"));
             var id2 = Ok(tmux.Run("split-window", "-d", "-h", "-t", PaneTarget(id1), "-c", cwd2, "-P", "-F", "#{pane_id}"));
             Ok(tmux.Run("split-window", "-d", "-v", "-t", PaneTarget(id2), "-c", cwd1, "-P", "-F", "#{pane_id}"));
             if (!OperatingSystem.IsWindows()) backend.MoveWindow(source + ":0", source, 3);
-            Ok(tmux.Run("new-window", "-d", "-t", source + (OperatingSystem.IsWindows() ? ":1" : ":7"), "-n", "other window", "-c", cwd2));
+            // Psmux appends new windows and refuses an index naming no window yet.
+            Ok(tmux.Run("new-window", "-d", "-t", source + (OperatingSystem.IsWindows() ? ":" : ":7"), "-n", "other window", "-c", cwd2));
             Ok(tmux.Run("new-session", "-d", "-s", sourceExtra, "-n", "second session", "-c", cwd1));
             var inventory = backend.Inventory();
             Assert.All(inventory, p => Assert.Contains(p.Pane.SessionName, new[] { source, sourceExtra }));
@@ -67,13 +69,18 @@ public class WorkspaceIntegrationTests
             Assert.Equal(5, snapshot.Sessions.SelectMany(s => s.Windows).Sum(w => w.Panes.Count));
             snapshot = snapshot with { Sessions = snapshot.Sessions.OrderBy(s => s.Name).ToList() };
             Assert.Contains(snapshot.Sessions[0].Windows.SelectMany(w => w.Panes), p => p.Paused);
-            snapshot.Sessions[0] = snapshot.Sessions[0] with { Name = restored };
+            // Psmux cannot create index gaps, so give its snapshot some to compact on import.
+            var saved = OperatingSystem.IsWindows()
+                ? snapshot.Sessions[0].Windows.Select((w, i) => w with { Index = 1 + i * 3 }).ToList()
+                : snapshot.Sessions[0].Windows;
+            snapshot.Sessions[0] = snapshot.Sessions[0] with { Name = restored, Windows = saved };
             snapshot.Sessions[1] = snapshot.Sessions[1] with { Name = restoredExtra };
             var result = service.ImportJson(snapshot.ToJson());
             if (result.Path is not null) reportPaths.Add(result.Path);
             Assert.True(result.Success, result.Message);
             var after = service.Capture().Sessions.Single(s => s.Name == restored);
-            Assert.Equal(snapshot.Sessions[0].Windows.Select(w => w.Index), after.Windows.Select(w => w.Index));
+            Assert.Equal(OperatingSystem.IsWindows() ? Enumerable.Range(0, saved.Count) : saved.Select(w => w.Index),
+                after.Windows.Select(w => w.Index));
             Assert.Equal(snapshot.Sessions[0].Windows.Select(w => w.Name), after.Windows.Select(w => w.Name));
             Assert.Equal(snapshot.Sessions[0].Windows.SelectMany(w => w.Panes).Select(p => p.Directory).Order(),
                 after.Windows.SelectMany(w => w.Panes).Select(p => p.Directory).Order());

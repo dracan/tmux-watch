@@ -259,7 +259,7 @@ public class WorkspaceFailureTests
             Assert.True(result.Success, result.Message);
             Assert.Equal("earlier", calls.Single(c => c[0] == "new-session")[5]);
             var newWindow = calls.Single(c => c[0] == "new-window");
-            Assert.Equal(("work:1", "later"), (newWindow[3], newWindow[5]));
+            Assert.Equal(("work:", "later"), (newWindow[3], newWindow[5]));
             Assert.DoesNotContain(calls, c => c[0] == "move-window");
             Assert.Equal("work:1", calls.Single(c => c[0] == "select-window")[2]);
             Assert.Contains($"work:{second} (later) restored as work:1", result.Message);
@@ -332,6 +332,16 @@ public class WorkspaceFailureTests
             _ => throw new InvalidOperationException("Unexpected operation: " + args[0]),
         }, "")), new() { TmuxExecutable = "psmux" }) { CreationWait = TimeSpan.FromSeconds(5) };
         Assert.Equal("%6", backend.Split("0:1", "0:1.0", "C:\\work", true));
+    }
+
+    [Fact]
+    public void Psmux_error_reply_with_success_status_fails_the_creation()
+    {
+        var backend = new WorkspaceBackend(new TmuxRunner(_ => new(true, 0, "ERROR: can't find window: 1\n", "")),
+            new() { TmuxExecutable = "psmux" });
+        var window = WorkspaceTests.Example().Sessions[0].Windows[0];
+        var error = Assert.Throws<IOException>(() => backend.CreateWindow("work", window, window.Panes[0]));
+        Assert.Equal("can't find window: 1", error.Message);
     }
 
     [Fact]

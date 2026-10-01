@@ -81,13 +81,22 @@ internal sealed class WorkspaceBackend(TmuxRunner tmux, WatchConfig config)
     }
 
     public string CreateSession(string session, SnapshotWindow window, SnapshotPane first, PaneLayout layout) =>
-        Checked(tmux.Run("new-session", "-d", "-s", session, "-n", window.Name,
+        Created(tmux.Run("new-session", "-d", "-s", session, "-n", window.Name,
             "-c", first.Directory, "-x", layout.Width.ToString(CultureInfo.InvariantCulture),
             "-y", layout.Height.ToString(CultureInfo.InvariantCulture), "-P", "-F", "#{window_id}|#{pane_id}"));
 
+    // Psmux always appends a new window, and since 3.3.8 resolves -t as an existing
+    // window first, so an index target fails. Name only the session there.
     public string CreateWindow(string session, SnapshotWindow window, SnapshotPane first) =>
-        Checked(tmux.Run("new-window", "-d", "-t", session + ":" + window.Index,
+        Created(tmux.Run("new-window", "-d", "-t", session + ":" + (IsPsmux ? "" : window.Index.ToString(CultureInfo.InvariantCulture)),
             "-n", window.Name, "-c", first.Directory, "-P", "-F", "#{window_id}|#{pane_id}"));
+
+    // Psmux reports a refused command as "ERROR: ..." on stdout with exit status 0.
+    private static string Created(TmuxResult result)
+    {
+        var output = Checked(result);
+        return output.StartsWith("ERROR: ", StringComparison.Ordinal) ? throw new IOException(output["ERROR: ".Length..]) : output;
+    }
 
     /// <summary>How long to wait for a creation whose -P output was missed.</summary>
     internal TimeSpan CreationWait { get; set; } = TimeSpan.FromSeconds(30);
@@ -121,7 +130,7 @@ internal sealed class WorkspaceBackend(TmuxRunner tmux, WatchConfig config)
     public string Split(string window, string target, string directory, bool horizontal)
     {
         var before = PaneIds(window);
-        var printed = Checked(tmux.Run("split-window", "-d", horizontal ? "-h" : "-v", "-t", target,
+        var printed = Created(tmux.Run("split-window", "-d", horizontal ? "-h" : "-v", "-t", target,
             "-c", directory, "-P", "-F", "#{pane_id}")).Trim();
         if (Identifier(printed, '%')) return printed;
         // Same missed -P as creation: the new pane is the one the window gained.
@@ -136,7 +145,7 @@ internal sealed class WorkspaceBackend(TmuxRunner tmux, WatchConfig config)
         Checked(tmux.Run("lsp", "-t", window, "-F", "#{pane_id}")).Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(l => l.Trim()).ToHashSet(StringComparer.Ordinal);
 
-    private bool Await(Func<bool> ready)
+    internal bool Await(Func<bool> ready)
     {
         var deadline = DateTime.UtcNow + CreationWait;
         while (!ready())

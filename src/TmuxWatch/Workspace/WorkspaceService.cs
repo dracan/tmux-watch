@@ -162,8 +162,9 @@ public sealed class WorkspaceService
                         var pid = WorkspaceBackend.Number(_backend.Read(targetPane, "#{pane_pid}"));
                         var serverPid = WorkspaceBackend.Number(_backend.Read(targetPane, "#{pid}"));
                         var index = WorkspaceBackend.Number(_backend.Read(targetPane, "#{pane_index}"));
-                        var actualDirectory = _backend.Read(targetPane, "#{pane_current_path}");
-                        if (!SameDirectory(actualDirectory, pane.Directory))
+                        // Psmux 3.3.8 reports the session directory until the new shell starts.
+                        var actualDirectory = "";
+                        if (!_backend.Await(() => SameDirectory(actualDirectory = _backend.Read(targetPane, "#{pane_current_path}"), pane.Directory)))
                             throw new IOException($"Directory differs for {targetPane}: expected {pane.Directory}, got {actualDirectory}.");
                         _pauses.Set(new Pane(newId, session.Name, window.Index, index, "", false,
                             window.Name, pane.Directory, Pid: pid, ServerPid: serverPid), pane.Paused);
