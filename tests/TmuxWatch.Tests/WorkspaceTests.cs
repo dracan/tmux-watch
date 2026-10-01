@@ -296,7 +296,7 @@ public class WorkspaceFailureTests
             _ => throw new InvalidOperationException("Unexpected operation: " + args[0]),
         }, ""));
         var service = new WorkspaceService(runner, new() { TmuxExecutable = "psmux" },
-            new PauseStore(Path.Combine(root, "paused"), _ => 42));
+            new PauseStore(Path.Combine(root, "paused"), _ => 42)) { CreationWait = TimeSpan.Zero };
         var result = service.ImportJson(WorkspaceTests.Example(root).ToJson());
         try
         {
@@ -308,6 +308,39 @@ public class WorkspaceFailureTests
             if (result.Path is not null) File.Delete(result.Path);
             Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public void Psmux_window_created_after_its_print_timeout_is_awaited()
+    {
+        var reads = 0;
+        var backend = new WorkspaceBackend(new TmuxRunner(args => ++reads < 3
+            ? new(true, 1, "", "can't find window: 1")
+            : new(true, 0, "@2|%6\n", "")), new() { TmuxExecutable = "psmux" }) { CreationWait = TimeSpan.FromSeconds(5) };
+        Assert.Equal("@2|%6", backend.CreatedIdentity("", "0:1"));
+        Assert.Equal(3, reads);
+    }
+
+    [Fact]
+    public void Psmux_pane_split_after_its_print_timeout_is_found_by_difference()
+    {
+        var listings = 0;
+        var backend = new WorkspaceBackend(new TmuxRunner(args => new(true, 0, args[0] switch
+        {
+            "split-window" => "",
+            "lsp" => ++listings < 4 ? "%5\n" : "%5\n%6\n",
+            _ => throw new InvalidOperationException("Unexpected operation: " + args[0]),
+        }, "")), new() { TmuxExecutable = "psmux" }) { CreationWait = TimeSpan.FromSeconds(5) };
+        Assert.Equal("%6", backend.Split("0:1", "0:1.0", "C:\\work", true));
+    }
+
+    [Fact]
+    public void Creation_that_never_appears_fails_with_what_was_returned()
+    {
+        var backend = new WorkspaceBackend(new TmuxRunner(_ => new(true, 1, "", "can't find window: 1")),
+            new() { TmuxExecutable = "psmux" }) { CreationWait = TimeSpan.Zero };
+        var error = Assert.Throws<InvalidDataException>(() => backend.CreatedIdentity("", "0:1"));
+        Assert.Contains("can't find window: 1", error.Message);
     }
 
     [Theory]

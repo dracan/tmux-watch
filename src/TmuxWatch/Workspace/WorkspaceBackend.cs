@@ -89,15 +89,25 @@ internal sealed class WorkspaceBackend(TmuxRunner tmux, WatchConfig config)
         Checked(tmux.Run("new-window", "-d", "-t", session + ":" + window.Index,
             "-n", window.Name, "-c", first.Directory, "-P", "-F", "#{window_id}|#{pane_id}"));
 
-    // Some psmux builds print nothing usable for -P -F. The new window is only
-    // addressable by its target then, which is how psmux paths address it anyway.
+    /// <summary>How long to wait for a creation whose -P output was missed.</summary>
+    internal TimeSpan CreationWait { get; set; } = TimeSpan.FromSeconds(30);
+
+    // Psmux answers -P only if the new window is ready within 2s, but finishes
+    // creating it regardless. A slow shell start therefore prints nothing, and
+    // the window appears at its target moments later.
     public string CreatedIdentity(string printed, string target)
     {
         if (WindowPaneIdentity(printed.Trim())) return printed.Trim();
-        var read = Read(target, "#{window_id}|#{pane_id}").Trim();
-        if (WindowPaneIdentity(read)) return read;
+        var read = "";
+        var found = Await(() =>
+        {
+            var result = tmux.Run("display-message", "-p", "-t", target, "#{window_id}|#{pane_id}");
+            read = result.Ok ? result.StdOut.Trim() : result.StdErr.Trim();
+            return result.Ok && WindowPaneIdentity(read);
+        });
+        if (found) return read;
         throw new InvalidDataException($"Creation of {target} returned no reliable window/pane identity " +
-            $"(printed \"{Visible(printed)}\", read \"{Visible(read)}\"); resources have been retained.");
+            $"within {CreationWait.TotalSeconds:0}s (printed \"{Visible(printed)}\", read \"{Visible(read)}\"); resources have been retained.");
     }
 
     private static bool WindowPaneIdentity(string text) => text.Split('|') is [var w, var p] &&
@@ -108,9 +118,34 @@ internal sealed class WorkspaceBackend(TmuxRunner tmux, WatchConfig config)
     public void MoveWindow(string source, string session, int index) =>
         Checked(tmux.Run("move-window", "-s", source, "-t", session + ":" + index));
 
-    public string Split(string target, string directory, bool horizontal) =>
-        Checked(tmux.Run("split-window", "-d", horizontal ? "-h" : "-v", "-t", target,
-            "-c", directory, "-P", "-F", "#{pane_id}"));
+    public string Split(string window, string target, string directory, bool horizontal)
+    {
+        var before = PaneIds(window);
+        var printed = Checked(tmux.Run("split-window", "-d", horizontal ? "-h" : "-v", "-t", target,
+            "-c", directory, "-P", "-F", "#{pane_id}")).Trim();
+        if (Identifier(printed, '%')) return printed;
+        // Same missed -P as creation: the new pane is the one the window gained.
+        string[] added = [];
+        if (Await(() => (added = PaneIds(window).Except(before).ToArray()).Length > 0) && added.Length == 1)
+            return added[0];
+        throw new InvalidDataException($"Split of {target} returned no reliable pane identity " +
+            $"(printed \"{Visible(printed)}\", new panes {added.Length}); created panes retained.");
+    }
+
+    private HashSet<string> PaneIds(string window) =>
+        Checked(tmux.Run("lsp", "-t", window, "-F", "#{pane_id}")).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim()).ToHashSet(StringComparer.Ordinal);
+
+    private bool Await(Func<bool> ready)
+    {
+        var deadline = DateTime.UtcNow + CreationWait;
+        while (!ready())
+        {
+            if (DateTime.UtcNow >= deadline) return false;
+            Thread.Sleep(250);
+        }
+        return true;
+    }
 
     public void Layout(string target, string layout) =>
         Checked(tmux.Run("select-layout", "-t", target, layout));

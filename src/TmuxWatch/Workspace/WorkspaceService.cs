@@ -21,6 +21,8 @@ public sealed class WorkspaceService
         _clipboard = clipboard ?? new WorkspaceClipboard();
     }
 
+    internal TimeSpan CreationWait { set => _backend.CreationWait = value; }
+
     public WorkspaceSnapshot Capture()
     {
         var inventory = _backend.Inventory();
@@ -105,8 +107,9 @@ public sealed class WorkspaceService
             foreach (var session in snapshot.Sessions!)
             {
                 var firstWindow = true;
-                // Psmux windows must be contiguous from zero, so compact gaps and other
-                // base indexes there, keeping saved order. Tmux keeps exact slots.
+                // Psmux's new-window ignores the -t index and appends, so windows can
+                // only land contiguously from zero there: compact them, keeping saved
+                // order. Tmux keeps exact slots.
                 var plan = session.Windows.OrderBy(w => w.Index)
                     .Select((w, i) => (Saved: w, Window: _backend.IsPsmux ? w with { Index = i } : w)).ToList();
                 foreach (var (saved, window) in plan)
@@ -142,8 +145,7 @@ public sealed class WorkspaceService
                         var sizes = _backend.Read(PaneTarget(windowTarget, last), "#{pane_width}|#{pane_height}").Split('|');
                         var width = WorkspaceBackend.Number(sizes[0]);
                         var height = WorkspaceBackend.Number(sizes[1]);
-                        var newId = _backend.Split(PaneTarget(windowTarget, last), ordered[i].Directory, width > height * 2);
-                        if (!WorkspaceBackend.Identifier(newId, '%')) throw new InvalidDataException("Split returned no reliable pane identity.");
+                        var newId = _backend.Split(windowTarget, PaneTarget(windowTarget, last), ordered[i].Directory, width > height * 2);
                         newPanes.Add(newId);
                         mapping[Id(ordered[i].SourceId)] = Id(newId);
                         Log($"Created pane {newId} in {windowTarget}: {ordered[i].Directory}");
