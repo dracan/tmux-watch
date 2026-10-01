@@ -89,6 +89,22 @@ internal sealed class WorkspaceBackend(TmuxRunner tmux, WatchConfig config)
         Checked(tmux.Run("new-window", "-d", "-t", session + ":" + window.Index,
             "-n", window.Name, "-c", first.Directory, "-P", "-F", "#{window_id}|#{pane_id}"));
 
+    // Some psmux builds print nothing usable for -P -F. The new window is only
+    // addressable by its target then, which is how psmux paths address it anyway.
+    public string CreatedIdentity(string printed, string target)
+    {
+        if (WindowPaneIdentity(printed.Trim())) return printed.Trim();
+        var read = Read(target, "#{window_id}|#{pane_id}").Trim();
+        if (WindowPaneIdentity(read)) return read;
+        throw new InvalidDataException($"Creation of {target} returned no reliable window/pane identity " +
+            $"(printed \"{Visible(printed)}\", read \"{Visible(read)}\"); resources have been retained.");
+    }
+
+    private static bool WindowPaneIdentity(string text) => text.Split('|') is [var w, var p] &&
+        Identifier(w, '@') && Identifier(p, '%');
+
+    private static string Visible(string text) => new(text.Select(c => char.IsControl(c) ? '?' : c).Take(200).ToArray());
+
     public void MoveWindow(string source, string session, int index) =>
         Checked(tmux.Run("move-window", "-s", source, "-t", session + ":" + index));
 

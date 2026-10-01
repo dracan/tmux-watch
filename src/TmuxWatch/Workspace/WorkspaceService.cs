@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using TmuxWatch.Config;
 using TmuxWatch.Tmux;
@@ -115,13 +116,12 @@ public sealed class WorkspaceService
                     var layout = PaneLayout.Parse(window.Layout);
                     var ordered = layout.Leaves.Select(l => window.Panes.Single(p => p.SourceId == "%" + l.PaneId)).ToList();
                     Log($"Creating {session.Name}:{window.Index} ({window.Name})");
-                    var target = firstWindow
+                    var printed = firstWindow
                         ? _backend.CreateSession(session.Name, window, ordered[0], layout)
                         : _backend.CreateWindow(session.Name, window, ordered[0]);
                     created = true;
-                    var fields = target.Split('|');
-                    if (fields.Length != 2 || !WorkspaceBackend.Identifier(fields[0], '@') || !WorkspaceBackend.Identifier(fields[1], '%'))
-                        throw new InvalidDataException("Creation returned no reliable window/pane identity; resources have been retained.");
+                    var fields = _backend.CreatedIdentity(printed,
+                        session.Name + ":" + (firstWindow ? "" : window.Index.ToString(CultureInfo.InvariantCulture))).Split('|');
                     var windowId = fields[0];
                     // Use the fully qualified target for psmux's per-session IDs.
                     var firstIndex = WorkspaceBackend.Number(_backend.Read(session.Name + ":", "#{window_index}"));
@@ -191,7 +191,8 @@ public sealed class WorkspaceService
         Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     internal static bool Expected(Exception e) => e is IOException or UnauthorizedAccessException or
-        System.Text.Json.JsonException or ArgumentException or InvalidOperationException or NotSupportedException;
+        System.Text.Json.JsonException or ArgumentException or InvalidOperationException or NotSupportedException or
+        InvalidDataException;
 
     internal static List<string> Validate(WorkspaceSnapshot snapshot, Func<string, bool> directoryExists)
     {

@@ -273,6 +273,44 @@ public class WorkspaceFailureTests
     }
 
     [Theory]
+    [InlineData("", "@1|%5", true)]
+    [InlineData(" @1|%5 \r\n", "", true)]
+    [InlineData("", "", false)]
+    public void Creation_identity_falls_back_to_reading_the_target_and_never_crashes(string printed, string read, bool succeeds)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tw-identity-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var runner = new TmuxRunner(args => new(true, 0, args[0] switch
+        {
+            "list-sessions" => "",
+            "new-session" => printed,
+            "lsp" => "%5|0",
+            "display-message" => args[^1] switch
+            {
+                "#{window_id}|#{pane_id}" => read,
+                "#{window_layout}" => WorkspaceTests.Layout("120x30,0,0,5"),
+                "#{pane_current_path}" => root,
+                _ => "0",
+            },
+            "select-layout" or "select-pane" or "select-window" => "",
+            _ => throw new InvalidOperationException("Unexpected operation: " + args[0]),
+        }, ""));
+        var service = new WorkspaceService(runner, new() { TmuxExecutable = "psmux" },
+            new PauseStore(Path.Combine(root, "paused"), _ => 42));
+        var result = service.ImportJson(WorkspaceTests.Example(root).ToJson());
+        try
+        {
+            Assert.Equal(succeeds, result.Success);
+            if (!succeeds) Assert.Contains("Partial restore retained", result.Message);
+        }
+        finally
+        {
+            if (result.Path is not null) File.Delete(result.Path);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
     [InlineData("send-keys")]
     [InlineData("run-shell")]
     [InlineData("kill-window")]
