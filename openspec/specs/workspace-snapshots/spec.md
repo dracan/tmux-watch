@@ -50,6 +50,11 @@ Imported text SHALL never become a command position or format expression.
 - **WHEN** a supported snapshot is imported into an otherwise non-conflicting server
 - **THEN** both backends recreate its names, directories, pane placement, split structure, and pause settings
 
+#### Scenario: Non-contiguous window indexes on psmux
+- **WHEN** a snapshot's window indexes have gaps or do not start at zero and the backend is psmux
+- **THEN** import restores the windows contiguously from zero in saved order, selects the saved active window, and reports each renumbered window
+- **AND** native tmux restores the exact saved indexes
+
 #### Scenario: Partial creation failure
 - **WHEN** a multiplexer operation fails after creation begins
 - **THEN** completed resources remain and the report identifies completed work and the failed step

@@ -87,11 +87,6 @@ public sealed class WorkspaceService
         {
             var snapshot = WorkspaceSnapshot.Parse(json);
             var errors = Validate(snapshot, Directory.Exists);
-            if (_backend.IsPsmux && snapshot.Sessions is not null)
-                foreach (var session in snapshot.Sessions.Where(s => s?.Windows is not null))
-                    if (!session.Windows.Where(w => w is not null).Select(w => w.Index).Order()
-                        .SequenceEqual(Enumerable.Range(0, session.Windows.Count)))
-                        errors.Add("Psmux requires contiguous window indexes starting at zero.");
             var existing = _backend.SessionNames();
             if (snapshot.Sessions is not null)
                 errors.AddRange(snapshot.Sessions.Where(s => s is not null && existing.Contains(s.Name))
@@ -109,8 +104,14 @@ public sealed class WorkspaceService
             foreach (var session in snapshot.Sessions!)
             {
                 var firstWindow = true;
-                foreach (var window in session.Windows.OrderBy(w => w.Index))
+                // Psmux windows must be contiguous from zero, so compact gaps and other
+                // base indexes there, keeping saved order. Tmux keeps exact slots.
+                var plan = session.Windows.OrderBy(w => w.Index)
+                    .Select((w, i) => (Saved: w, Window: _backend.IsPsmux ? w with { Index = i } : w)).ToList();
+                foreach (var (saved, window) in plan)
                 {
+                    if (window.Index != saved.Index)
+                        Log($"Window {session.Name}:{saved.Index} ({saved.Name}) restored as {session.Name}:{window.Index}; psmux needs contiguous indexes.");
                     var layout = PaneLayout.Parse(window.Layout);
                     var ordered = layout.Leaves.Select(l => window.Panes.Single(p => p.SourceId == "%" + l.PaneId)).ToList();
                     Log($"Creating {session.Name}:{window.Index} ({window.Name})");
@@ -168,7 +169,7 @@ public sealed class WorkspaceService
                         Log($"{session.Name}:{window.Index}.{index} | {pane.Directory} | {(pane.Paused ? "paused" : "active")} | {ResumeGuidance.For(pane)}");
                     }
                 }
-                var active = session.Windows.FirstOrDefault(w => w.Active);
+                var active = plan.Select(p => p.Window).FirstOrDefault(w => w.Active);
                 if (active is not null) _backend.SelectWindow(session.Name + ":" + active.Index);
             }
             Log("Restore complete. Run any listed resume commands manually in their panes.");

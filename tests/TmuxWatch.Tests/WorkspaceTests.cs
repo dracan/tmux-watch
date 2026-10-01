@@ -217,6 +217,62 @@ public class WorkspaceFailureTests
     }
 
     [Theory]
+    [InlineData(1, 3)]
+    [InlineData(0, 2)]
+    public void Psmux_import_compacts_window_indexes_in_saved_order(int first, int second)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tw-psmux-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var calls = new List<string[]>();
+        var windows = 0;
+        string Pane(string target) => "%" + (5 + WorkspaceBackend.Number(target.Split(':')[1].Split('.')[0]));
+        var runner = new TmuxRunner(args =>
+        {
+            calls.Add(args);
+            var text = args[0] switch
+            {
+                "list-sessions" => "",
+                "new-session" or "new-window" => $"@{++windows}|%{4 + windows}",
+                "lsp" => Pane(args[2]) + "|0",
+                "display-message" => args[^1] switch
+                {
+                    "#{window_index}" => "0",
+                    "#{window_layout}" => WorkspaceTests.Layout("120x30,0,0," + Pane(args[3])[1..]),
+                    "#{pane_current_path}" => root,
+                    "#{pane_index}" => "0",
+                    _ => "100",
+                },
+                "select-layout" or "select-pane" or "select-window" => "",
+                _ => throw new InvalidOperationException("Unexpected operation: " + args[0]),
+            };
+            return new(true, 0, text, "");
+        });
+        SnapshotWindow Window(string id, int index, string name, bool active) => new(id, index, name,
+            WorkspaceTests.Layout("120x30,0,0,1"), active, false, [new("%1", 0, root, "", false, true, false, null, null)]);
+        var snapshot = new WorkspaceSnapshot(1, DateTimeOffset.UtcNow, "windows",
+            [new("work", [Window("$0/@3", second, "later", true), Window("$0/@1", first, "earlier", false)])]);
+        var service = new WorkspaceService(runner, new() { TmuxExecutable = "psmux" },
+            new PauseStore(Path.Combine(root, "paused"), _ => 42));
+        var result = service.ImportJson(snapshot.ToJson());
+        try
+        {
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("earlier", calls.Single(c => c[0] == "new-session")[5]);
+            var newWindow = calls.Single(c => c[0] == "new-window");
+            Assert.Equal(("work:1", "later"), (newWindow[3], newWindow[5]));
+            Assert.DoesNotContain(calls, c => c[0] == "move-window");
+            Assert.Equal("work:1", calls.Single(c => c[0] == "select-window")[2]);
+            Assert.Contains($"work:{second} (later) restored as work:1", result.Message);
+            Assert.Equal(first != 0, result.Message.Contains($"work:{first} (earlier) restored as work:0"));
+        }
+        finally
+        {
+            if (result.Path is not null) File.Delete(result.Path);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
     [InlineData("send-keys")]
     [InlineData("run-shell")]
     [InlineData("kill-window")]
