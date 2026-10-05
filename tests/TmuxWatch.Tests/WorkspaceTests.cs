@@ -232,6 +232,22 @@ public class WorkspaceFailureTests
         Assert.Equal(new[] { "list-sessions" }, calls);
     }
 
+    [Theory]
+    [InlineData("- a markdown bullet", "starts \"- a markdown bullet\"")]
+    [InlineData("  \n", "it is empty")]
+    public void Clipboard_without_a_snapshot_names_its_source_and_creates_nothing(string text, string detail)
+    {
+        var calls = new List<string>();
+        var service = new WorkspaceService(new TmuxRunner(args => { calls.Add(args[0]); return new(true, 0, "", ""); }),
+            new(), new PauseStore(), new MemoryClipboard { Text = text });
+        var result = service.ImportClipboard();
+        Assert.False(result.Success);
+        Assert.StartsWith("Nothing created: The clipboard does not hold a workspace snapshot", result.Message);
+        Assert.Contains(detail, result.Message);
+        Assert.Null(result.Path);
+        Assert.Empty(calls);
+    }
+
     [Fact]
     public void Late_failure_reports_created_window_without_deleting_it()
     {

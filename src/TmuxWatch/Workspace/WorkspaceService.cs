@@ -71,7 +71,7 @@ public sealed class WorkspaceService
 
     public WorkspaceResult ImportFile(string path)
     {
-        try { return ImportJson(File.ReadAllText(path)); }
+        try { return ImportJson(File.ReadAllText(path), "File " + path); }
         catch (Exception e) when (Expected(e)) { return new(false, e.Message); }
     }
 
@@ -81,18 +81,27 @@ public sealed class WorkspaceService
 
     public WorkspaceResult ImportClipboard()
     {
-        try { return ImportJson(_clipboard.Read()); }
+        try { return ImportJson(_clipboard.Read(), "The clipboard"); }
         catch (Exception e) when (Expected(e)) { return new(false, e.Message); }
     }
 
-    public WorkspaceResult ImportJson(string json)
+    public WorkspaceResult ImportJson(string json) => ImportJson(json, "The input");
+
+    private WorkspaceResult ImportJson(string json, string source)
     {
+        WorkspaceSnapshot snapshot;
+        try { snapshot = WorkspaceSnapshot.Parse(json); }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException)
+        {
+            var start = new string(json.TrimStart().Take(40).Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+            return new(false, $"Nothing created: {source} does not hold a workspace snapshot" +
+                (start.Length == 0 ? " (it is empty)." : $" (starts \"{start}\"). {e.Message}"));
+        }
         var report = new StringBuilder();
         var created = false;
         string? reportPath = null;
         try
         {
-            var snapshot = WorkspaceSnapshot.Parse(json);
             var errors = Validate(snapshot, Directory.Exists);
             var existing = _backend.SessionNames();
             if (snapshot.Sessions is not null)
