@@ -45,7 +45,9 @@ if (options.Export || options.ImportPath is not null || options.ImportClipboard 
 if (options.Calibrate)
     return Calibrate(tmux, discovery, cfg);
 
-var notifier = NotifierFactory.Create(cfg);
+// Deferred so the live view can replay notifications on its render thread; see
+// DeferredNotifier.
+var notifier = new DeferredNotifier(NotifierFactory.Create(cfg));
 var pointer = PointerSignalFactory.Create(cfg);
 
 // Crash-safety: unconditionally restore the normal pointer at startup, before the
@@ -63,11 +65,12 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) => pointer.Restore();
 if (options.Once)
 {
     var snap = monitor.Tick();
+    notifier.Flush();
     PrintOnce(snap);
     return 0;
 }
 
-new WatcherApp(monitor, tmux, cfg, pointer, pauses, workspace).Run(cts.Token);
+new WatcherApp(monitor, tmux, cfg, pointer, pauses, workspace, notifier).Run(cts.Token);
 return 0;
 
 static void PrintOnce(MonitorSnapshot snap)

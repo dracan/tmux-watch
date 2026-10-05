@@ -54,8 +54,12 @@ public sealed class FakeTmuxClient : ITmuxClient
                        : TmuxResult.NotStarted(ErrorMessage);
     }
 
+    /// <summary>Runs before each capture, so a test can hold a tick mid-I/O.</summary>
+    public Action<string>? BeforeCapture { get; set; }
+
     public TmuxResult CapturePane(string paneId)
     {
+        BeforeCapture?.Invoke(paneId);
         CapturedPanes.Add(paneId);
         return Captures.TryGetValue(paneId, out var text)
             ? new TmuxResult(true, 0, text, "")

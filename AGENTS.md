@@ -332,6 +332,31 @@ first `AnsiConsole` use (it rebinds `AnsiConsole.Console` so ordering cannot sil
 defeat it). Terminal detection is unaffected because `Console.SetOut` swaps only the sink,
 not the underlying handle.
 
+## Polling is off the input thread
+
+`WatcherApp.Run` polls on a dedicated background thread (`PollLoop`) and keeps the
+render thread for keys and painting. A tick is an `lsp` plus one `capture-pane` per agent
+pane, each a process spawn, plus a pause-file read per pane: a few ms in all on Linux, but
+on a Windows/psmux host it ran long enough that the arrow keys visibly froze for part of
+every poll while they shared a thread. Keep tmux, process and file I/O off the render
+thread; user-initiated actions (jumps, `n`, import) are the exception, since they must
+finish before their optimistic update means anything.
+
+Four details keep it correct:
+
+- **`AttentionMonitor.Tick` locks only its apply phase.** Enumeration, capture and
+  classification run unlocked; the state machine and `Acknowledge` share one lock, so an
+  ack never waits for a capture.
+- **Polls are applied on the render thread.** The poller hands its snapshot over a
+  latest-wins slot, and `ApplyPoll` folds it in, so `ExpireHolds` still runs only when a
+  poll lands - the "released only by a poll" rule above is unchanged.
+- **A poll that began before a local change is dropped** (`IsStaleSnapshot`) and a fresh
+  one requested. Jumps, acks, pauses and created windows update the view optimistically;
+  without this an in-flight poll would flash the old state back for one interval.
+  Stamp any new optimistic action with `MarkLocalAction`.
+- **Notifications are deferred to the render thread** (`DeferredNotifier`). The bell
+  writes to the buffered stdout below, which is not thread-safe.
+
 ## Conventions
 
 - Match the surrounding code's style; keep the classifier pure and fixture-tested.

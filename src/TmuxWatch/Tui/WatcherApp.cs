@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using TmuxWatch.Config;
 using TmuxWatch.Detection;
 using TmuxWatch.Monitor;
+using TmuxWatch.Notifications;
 using TmuxWatch.Pointer;
 using TmuxWatch.Tmux;
 using TmuxWatch.Workspace;
@@ -112,9 +114,17 @@ public sealed class WatcherApp
     private LineEditor? _prompt;
     private string _promptSession = "";
 
+    // When the user last changed something optimistically - a jump, an ack, a pause, a
+    // created window or an import. A poll that began before it cannot reflect that change,
+    // so applying it would flash the old state back for one poll; see IsStaleSnapshot.
+    private DateTimeOffset _lastLocalActionAt = DateTimeOffset.MinValue;
+
+    private readonly DeferredNotifier? _notifications;
+
     public WatcherApp(AttentionMonitor monitor, ITmuxClient tmux, WatchConfig cfg, IPointerSignal? pointer = null,
-        PauseStore? pauseStore = null, WorkspaceService? workspace = null)
+        PauseStore? pauseStore = null, WorkspaceService? workspace = null, DeferredNotifier? notifications = null)
     {
+        _notifications = notifications;
         _monitor = monitor;
         _tmux = tmux;
         _cfg = cfg;
@@ -164,11 +174,10 @@ public sealed class WatcherApp
     /// <summary>
     /// The poll slice for a configured interval, floored at <see cref="MinPollMs"/> -
     /// clamped at the point of use like every other timing knob (see AttentionMonitor's
-    /// constructor). Zero or negative makes the wait loop's body unreachable: no sleep,
-    /// no key handling, and Tick() re-enters at once, forking an `lsp` plus a
-    /// capture-pane per agent pane as fast as the process can. That is a pegged core and
-    /// a watcher answering nothing but SIGINT, from `--interval 0` or a stray minus sign
-    /// (both parse, neither was checked). NaN falls through the comparison, so it is
+    /// constructor). Zero or negative makes the poller's wait return at once, so Tick()
+    /// re-enters immediately, forking an `lsp` plus a capture-pane per agent pane as fast
+    /// as the process can. That is a pegged core, from `--interval 0` or a stray minus
+    /// sign (both parse, neither was checked). NaN falls through the comparison, so it is
     /// mapped explicitly rather than left to cast to zero.
     /// </summary>
     internal static int PollMsFor(double seconds)
@@ -197,48 +206,178 @@ public sealed class WatcherApp
         var frame = new FrameState();
         var initial = BuildView(WatchLayout.Empty, null, DateTimeOffset.UtcNow);
 
+        // Polling runs on its own thread so the keyboard never waits on it. A tick is an
+        // `lsp` plus one capture per agent pane, each a process spawn - a few ms apiece
+        // on Linux, but tens of ms on a Windows/psmux host, where doing it inline froze
+        // the arrow keys for most of every poll. See PollLoop.
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var channel = new PollChannel();
+        var poller = new Thread(() => PollLoop(pollMs, channel, stop.Token))
+        {
+            IsBackground = true,
+            Name = "tmux-watch poll",
+        };
+
         try
         {
             AnsiConsole.Live(initial)
                 .AutoClear(false)
                 .Start(ctx =>
                 {
+                    poller.Start();
                     while (!token.IsCancellationRequested)
                     {
-                        var snapshot = _monitor.Tick();
-                        // Each tick contacts tmux and reports authoritatively, so the
-                        // snapshot replaces the error rather than merging with it -
-                        // carrying the previous one forward left a resolved failure (and,
-                        // once n existed, a one-off create failure) pinned to the caption
-                        // for the rest of the session.
-                        frame.Error = snapshot.Error;
-                        frame.AgentViews = snapshot.Panes.ToList();
-                        frame.OtherPanes = snapshot.OtherPanes.ToList();
-                        RefreshPauses(frame);
+                        if (channel.TryTake() is { } polled)
+                            ApplyPoll(frame, polled, channel, ctx);
 
-                        // The only place a hold is released. Doing it here rather than in
-                        // Rebuild is what ties the release to a poll: a row that has to
-                        // move does so alongside news from tmux, never on a keystroke.
-                        ExpireHolds(
-                            _ackHolds,
-                            frame.AgentViews.Select(v => v.Pane.Key),
-                            DateTimeOffset.UtcNow);
-
-                        Rebuild(frame);
-                        Render(frame, ctx);
-                        DrivePointer(frame.AgentViews);
-
-                        if (WaitAndHandleKeys(pollMs, frame, ctx, token))
+                        if (HandleKeys(frame, ctx))
                             break; // quit requested
+
+                        // Wakes early when a poll lands. The timeout is what bounds how
+                        // soon a keystroke is noticed - there is no portable waitable
+                        // handle for console input - so it stays short; with the tmux
+                        // work on the poller this loop is only a KeyAvailable check, and
+                        // the shorter slice while the name prompt is open is cheaper still.
+                        WaitHandle.WaitAny(
+                            [channel.Ready, token.WaitHandle], _prompt is not null ? 8 : 15);
                     }
                 });
         }
         finally
         {
+            stop.Cancel();
+            // Bounded: a poller stuck in a tmux call must not hold the exit. It is a
+            // background thread and writes nothing to the console, so leaving it behind
+            // is harmless.
+            if (poller.IsAlive)
+                poller.Join(TimeSpan.FromSeconds(1));
+
             // The teardown Spectre writes on exit (cursor restore) is buffered too, so
             // the last flush has to happen after Live returns, however it returned.
             buffered?.Flush();
         }
+    }
+
+    /// <summary>One completed poll, as handed from the polling thread to the render loop.</summary>
+    private sealed record PolledFrame(
+        MonitorSnapshot Snapshot,
+        IReadOnlySet<string>? Paused,
+        string? PauseError,
+        DateTimeOffset StartedAt,
+        ExceptionDispatchInfo? Fault = null);
+
+    /// <summary>
+    /// The handoff between the poller and the render loop: a single slot where the latest
+    /// poll wins (an older unread one is never worth drawing), plus a signal each way.
+    /// </summary>
+    private sealed class PollChannel
+    {
+        private PolledFrame? _latest;
+
+        /// <summary>Set by the poller when a poll lands, to wake the render loop early.</summary>
+        public readonly AutoResetEvent Ready = new(false);
+
+        /// <summary>Set by the render loop to cut the poller's wait short.</summary>
+        public readonly AutoResetEvent PollNow = new(false);
+
+        public void Publish(PolledFrame frame)
+        {
+            Volatile.Write(ref _latest, frame);
+            Ready.Set();
+        }
+
+        public PolledFrame? TryTake() => Interlocked.Exchange(ref _latest, null);
+    }
+
+    /// <summary>
+    /// The polling thread: tick, read the pause records, publish, then wait out the poll
+    /// interval. The interval runs from the end of one tick to the start of the next, as
+    /// it did inline, so a host whose ticks outlast the interval is never polled
+    /// back-to-back. Touches only the monitor (which locks its own state) and the pause
+    /// files; everything the view owns stays on the render thread.
+    /// </summary>
+    private void PollLoop(int pollMs, PollChannel channel, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            var startedAt = DateTimeOffset.UtcNow;
+            try
+            {
+                var snapshot = _monitor.Tick();
+                var (paused, pauseError) = snapshot.Error is null
+                    ? ReadPauses(snapshot)
+                    : (null, null);
+                channel.Publish(new PolledFrame(snapshot, paused, pauseError, startedAt));
+            }
+            catch (Exception e)
+            {
+                // Re-thrown on the render thread, so a failure still ends the watcher
+                // through Live's teardown with its stack trace, as it did inline.
+                channel.Publish(new PolledFrame(
+                    null!, null, null, startedAt, ExceptionDispatchInfo.Capture(e)));
+                return;
+            }
+
+            WaitHandle.WaitAny([channel.PollNow, token.WaitHandle], pollMs);
+        }
+    }
+
+    /// <summary>
+    /// Whether a poll is too old to draw: it began before the user's latest optimistic
+    /// change, so tmux (or the monitor) was read before that change happened. Drawing it
+    /// would revert the change on screen until the next poll - the focus marker snapping
+    /// back after a jump, a just-acked DONE reappearing, a paused row unpausing.
+    /// </summary>
+    internal static bool IsStaleSnapshot(DateTimeOffset pollStartedAt, DateTimeOffset lastLocalActionAt) =>
+        pollStartedAt < lastLocalActionAt;
+
+    /// <summary>Note that the view was just changed ahead of tmux; see <see cref="IsStaleSnapshot"/>.</summary>
+    private void MarkLocalAction() => _lastLocalActionAt = DateTimeOffset.UtcNow;
+
+    /// <summary>Fold a landed poll into the frame and redraw. Render thread only.</summary>
+    private void ApplyPoll(FrameState frame, PolledFrame polled, PollChannel channel, LiveDisplayContext ctx)
+    {
+        polled.Fault?.Throw();
+
+        // Notifications ride on the monitor, not on the snapshot, so they replay even
+        // when this poll's view is discarded below; Render's flush (or the one here)
+        // carries the bell out.
+        _notifications?.Flush();
+
+        if (IsStaleSnapshot(polled.StartedAt, _lastLocalActionAt))
+        {
+            Console.Out.Flush();
+            channel.PollNow.Set();
+            return;
+        }
+
+        // Each tick contacts tmux and reports authoritatively, so the snapshot replaces
+        // the error rather than merging with it - carrying the previous one forward left
+        // a resolved failure (and, once n existed, a one-off create failure) pinned to
+        // the caption for the rest of the session.
+        var snapshot = polled.Snapshot;
+        frame.Error = snapshot.Error;
+        frame.AgentViews = snapshot.Panes.ToList();
+        frame.OtherPanes = snapshot.OtherPanes.ToList();
+        if (polled.PauseError is not null)
+            frame.Error = polled.PauseError;
+        else if (polled.Paused is not null)
+        {
+            _paused.Clear();
+            _paused.UnionWith(polled.Paused);
+        }
+
+        // The only place a hold is released. Doing it here rather than in Rebuild is
+        // what ties the release to a poll: a row that has to move does so alongside news
+        // from tmux, never on a keystroke.
+        ExpireHolds(
+            _ackHolds,
+            frame.AgentViews.Select(v => v.Pane.Key),
+            DateTimeOffset.UtcNow);
+
+        Rebuild(frame);
+        Render(frame, ctx);
+        DrivePointer(frame.AgentViews);
     }
 
     /// <summary>
@@ -509,161 +648,150 @@ public sealed class WatcherApp
         };
     }
 
-    /// <summary>Returns true if the user asked to quit.</summary>
-    private bool WaitAndHandleKeys(
-        int pollMs,
-        FrameState frame,
-        LiveDisplayContext ctx,
-        CancellationToken token)
+    /// <summary>
+    /// Drain and act on every keystroke that has arrived. Returns true if the user asked
+    /// to quit.
+    /// </summary>
+    private bool HandleKeys(FrameState frame, LiveDisplayContext ctx)
     {
-        // Measured rather than accumulated from the nominal slice: Thread.Sleep overshoots,
-        // so adding the requested figure stretched the poll interval well past pollMs -
-        // most visibly with the short slice used while the prompt is open.
-        var clock = Stopwatch.StartNew();
-        while (clock.ElapsedMilliseconds < pollMs && !token.IsCancellationRequested)
+        // Edits and highlight moves are rendered once per drain, not once per key: with
+        // key repeat holding an arrow, a repaint per repeat queues faster than a slow
+        // console can paint, and the highlight keeps travelling after the key is let go.
+        var dirty = false;
+        try
         {
-            var promptDirty = false;
-            try
+            // Drain every keystroke that has arrived, rather than one per slice. One key per
+            // wait caps input and makes fast typing in the name prompt arrive in visible
+            // bursts.
+            while (Console.KeyAvailable)
             {
-                // Drain every keystroke that has arrived, rather than one per slice. One
-                // key per sleep caps input at 20 characters a second and makes fast typing
-                // in the name prompt arrive in visible bursts.
-                while (Console.KeyAvailable)
+                var key = Console.ReadKey(intercept: true);
+
+                switch (ClassifyKey(key, _prompt is not null))
                 {
-                    var key = Console.ReadKey(intercept: true);
+                    case KeyAction.PromptInput:
+                        dirty |= HandlePromptKey(key, frame, ctx);
+                        break;
 
-                    switch (ClassifyKey(key, _prompt is not null))
-                    {
-                        case KeyAction.PromptInput:
-                            // Rendering is deferred to once per drain: a full table
-                            // rebuild per keystroke is wasted work when several are
-                            // already queued.
-                            promptDirty |= HandlePromptKey(key, frame, ctx);
-                            break;
+                    case KeyAction.Quit:
+                        return true;
 
-                        case KeyAction.Quit:
-                            return true;
+                    case KeyAction.MoveUp:
+                    case KeyAction.MoveDown:
+                        // Walk the visible rows as one continuous list across all tables.
+                        MoveHighlight(frame, key.Key == ConsoleKey.UpArrow ? -1 : 1);
+                        dirty = true;
+                        break;
 
-                        case KeyAction.MoveUp:
-                        case KeyAction.MoveDown:
-                            // Walk the visible rows as one continuous list across all tables.
-                            MoveHighlight(frame, key.Key == ConsoleKey.UpArrow ? -1 : 1);
-                            Render(frame, ctx);
-                            break;
+                    case KeyAction.ActivateHighlighted:
+                        Activate(frame, _highlightIndex, ctx);
+                        break;
 
-                        case KeyAction.ActivateHighlighted:
-                            Activate(frame, _highlightIndex, ctx);
-                            break;
+                    case KeyAction.AddressRow:
+                        Activate(frame, IndexForAddressKey(key.KeyChar), ctx);
+                        break;
 
-                        case KeyAction.AddressRow:
-                            Activate(frame, IndexForAddressKey(key.KeyChar), ctx);
-                            break;
-
-                        case KeyAction.TogglePauseRow:
-                            // Park (or resume) the highlighted row. Re-order so it moves
-                            // between its table and the Paused table immediately, and
-                            // re-evaluate the pointer cue so pausing a waiting pane
-                            // clears it (and resuming re-arms it) without waiting a tick.
-                            // A non-agent row has no cue, so this is purely decluttering.
-                            // Passing the holds is what lets a paused row move at once:
-                            // TogglePause releases its hold. See TogglePause.
-                            if (PauseHighlighted(frame))
-                            {
-                                Rebuild(frame);
-                                Render(frame, ctx);
-                                DrivePointer(frame.AgentViews);
-                            }
-                            break;
-
-                        case KeyAction.ToggleWide:
-                            // Toggle wide mode, which shows/hides the Path and Loc
-                            // columns. Re-render immediately so the change is visible.
-                            _wideMode = !_wideMode;
-                            Render(frame, ctx);
-                            break;
-
-                        case KeyAction.ToggleOthers:
-                            _showOtherPanes = !_showOtherPanes;
+                    case KeyAction.TogglePauseRow:
+                        // Park (or resume) the highlighted row. Re-order so it moves
+                        // between its table and the Paused table immediately, and
+                        // re-evaluate the pointer cue so pausing a waiting pane
+                        // clears it (and resuming re-arms it) without waiting a tick.
+                        // A non-agent row has no cue, so this is purely decluttering.
+                        // Passing the holds is what lets a paused row move at once:
+                        // TogglePause releases its hold. See TogglePause.
+                        if (PauseHighlighted(frame))
+                        {
+                            MarkLocalAction();
                             Rebuild(frame);
                             Render(frame, ctx);
-                            break;
+                            DrivePointer(frame.AgentViews);
+                        }
+                        break;
 
-                        case KeyAction.ToggleCompanions:
-                            // Inert while the other-panes table is hidden: Rebuild simply
-                            // produces the same (empty) row set.
-                            _showCompanionPanes = !_showCompanionPanes;
+                    case KeyAction.ToggleWide:
+                        // Toggle wide mode, which shows/hides the Path and Loc
+                        // columns. Re-render immediately so the change is visible.
+                        _wideMode = !_wideMode;
+                        Render(frame, ctx);
+                        break;
+
+                    case KeyAction.ToggleOthers:
+                        _showOtherPanes = !_showOtherPanes;
+                        Rebuild(frame);
+                        Render(frame, ctx);
+                        break;
+
+                    case KeyAction.ToggleCompanions:
+                        // Inert while the other-panes table is hidden: Rebuild simply
+                        // produces the same (empty) row set.
+                        _showCompanionPanes = !_showCompanionPanes;
+                        Rebuild(frame);
+                        Render(frame, ctx);
+                        break;
+
+                    case KeyAction.AcknowledgeRow:
+                        // Acknowledge the highlighted row if it is DONE, without
+                        // switching to it - the keystroke is what clears it, so a pane
+                        // that already holds focus is never auto-acknowledged.
+                        // Re-render and re-drive the pointer so the green cue clears
+                        // immediately.
+                        var row = HighlightedRow(frame);
+                        if (row is { IsAgent: true } && _monitor.Acknowledge(row.Id))
+                        {
+                            // Same hold as a jump: the badge flips to IDLE at once,
+                            // but the row does not slide out from under the cursor.
+                            RecordAckHold(
+                                _ackHolds, row.Agent!, _cfg.AckHoldSeconds,
+                                DateTimeOffset.UtcNow);
+                            ApplyOptimisticAck(frame.AgentViews, row.Id);
+                            MarkLocalAction();
                             Rebuild(frame);
                             Render(frame, ctx);
-                            break;
+                            DrivePointer(frame.AgentViews);
+                        }
+                        break;
 
-                        case KeyAction.AcknowledgeRow:
-                            // Acknowledge the highlighted row if it is DONE, without
-                            // switching to it - the keystroke is what clears it, so a pane
-                            // that already holds focus is never auto-acknowledged.
-                            // Re-render and re-drive the pointer so the green cue clears
-                            // immediately.
-                            var row = HighlightedRow(frame);
-                            if (row is { IsAgent: true } && _monitor.Acknowledge(row.Id))
-                            {
-                                // Same hold as a jump: the badge flips to IDLE at once,
-                                // but the row does not slide out from under the cursor.
-                                RecordAckHold(
-                                    _ackHolds, row.Agent!, _cfg.AckHoldSeconds,
-                                    DateTimeOffset.UtcNow);
-                                ApplyOptimisticAck(frame.AgentViews, row.Id);
-                                Rebuild(frame);
-                                Render(frame, ctx);
-                                DrivePointer(frame.AgentViews);
-                            }
-                            break;
+                    case KeyAction.ExportWorkspace:
+                        if (_workspace is not null)
+                        {
+                            _workspaceMessage = "Exporting workspace...";
+                            Render(frame, ctx);
+                            _workspaceMessage = _workspace.Export().Message;
+                            Render(frame, ctx);
+                        }
+                        break;
 
-                        case KeyAction.ExportWorkspace:
-                            if (_workspace is not null)
-                            {
-                                _workspaceMessage = "Exporting workspace...";
-                                Render(frame, ctx);
-                                _workspaceMessage = _workspace.Export().Message;
-                                Render(frame, ctx);
-                            }
-                            break;
+                    case KeyAction.ImportWorkspace:
+                        if (_workspace is not null)
+                        {
+                            _importPrompt = true;
+                            _latestExport = WorkspaceFiles.LatestSnapshot();
+                            _prompt = LineEditor.Empty;
+                            Render(frame, ctx);
+                        }
+                        break;
 
-                        case KeyAction.ImportWorkspace:
-                            if (_workspace is not null)
-                            {
-                                _importPrompt = true;
-                                _latestExport = WorkspaceFiles.LatestSnapshot();
-                                _prompt = LineEditor.Empty;
-                                Render(frame, ctx);
-                            }
-                            break;
-
-                        case KeyAction.OpenNewWindowPrompt:
-                            // Open the name prompt against the session resolved right now.
-                            // Nothing is created until submit, and nothing at all happens
-                            // when there is no row to derive a session from.
-                            if (ResolveTargetSession(frame.Layout.All, _highlightedId) is { } session)
-                            {
-                                _prompt = LineEditor.Empty;
-                                _promptSession = session;
-                                Render(frame, ctx);
-                            }
-                            break;
-                    }
+                    case KeyAction.OpenNewWindowPrompt:
+                        // Open the name prompt against the session resolved right now.
+                        // Nothing is created until submit, and nothing at all happens
+                        // when there is no row to derive a session from.
+                        if (ResolveTargetSession(frame.Layout.All, _highlightedId) is { } session)
+                        {
+                            _prompt = LineEditor.Empty;
+                            _promptSession = session;
+                            Render(frame, ctx);
+                        }
+                        break;
                 }
             }
-            catch (InvalidOperationException)
-            {
-                // Console input redirected; ignore key handling.
-            }
-
-            if (promptDirty)
-                Render(frame, ctx);
-
-            // The sleep is what bounds how soon a keystroke is noticed, so it shortens
-            // while the prompt is open - 50ms of latency per character is felt as lag,
-            // and the tighter poll only runs while someone is actually typing.
-            Thread.Sleep(_prompt is not null ? 8 : 50);
         }
+        catch (InvalidOperationException)
+        {
+            // Console input redirected; ignore key handling.
+        }
+
+        if (dirty)
+            Render(frame, ctx);
         return false;
     }
 
@@ -758,6 +886,7 @@ public sealed class WatcherApp
         ClearFocusMarker(frame.AgentViews, session);
         ClearFocusMarker(frame.OtherPanes, session);
 
+        MarkLocalAction();
         Rebuild(frame);
         Render(frame, ctx);
     }
@@ -856,6 +985,7 @@ public sealed class WatcherApp
 
         // The highlight follows the row you jumped to.
         _highlightedId = row.Id;
+        MarkLocalAction();
         Rebuild(frame);
         Render(frame, ctx);
         DrivePointer(frame.AgentViews);
@@ -1111,18 +1241,21 @@ public sealed class WatcherApp
             $"{Markup.Escape(CaretTail(editor))}   " +
             "[grey]enter = create · esc = cancel[/]");
 
-    private void RefreshPauses(FrameState frame)
+    /// <summary>
+    /// The paused set for a poll's panes, read from the shared pause store on the
+    /// polling thread (a file open per pane). Null when there is no store, leaving the
+    /// in-memory set to the key handler alone.
+    /// </summary>
+    private (IReadOnlySet<string>? Paused, string? Error) ReadPauses(MonitorSnapshot snapshot)
     {
-        if (_pauseStore is null || frame.Error is not null) return;
+        if (_pauseStore is null) return (null, null);
         try
         {
-            var paused = frame.AgentViews.Select(v => v.Pane).Concat(frame.OtherPanes)
-                .Where(_pauseStore.IsPaused).Select(p => p.Key).ToHashSet();
-            _paused.Clear();
-            _paused.UnionWith(paused);
+            return (snapshot.Panes.Select(v => v.Pane).Concat(snapshot.OtherPanes)
+                .Where(_pauseStore.IsPaused).Select(p => p.Key).ToHashSet(), null);
         }
         catch (Exception e) when (WorkspaceService.Expected(e))
-        { frame.Error = "Pause state: " + e.Message; }
+        { return (null, "Pause state: " + e.Message); }
     }
 
     private bool PauseHighlighted(FrameState frame)

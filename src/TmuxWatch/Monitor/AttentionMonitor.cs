@@ -44,6 +44,10 @@ public sealed class AttentionMonitor
 
     private readonly Dictionary<string, TrackedPane> _tracked = new();
 
+    // Guards _tracked: the live view polls on a background thread while acknowledgements
+    // arrive from the key handler.
+    private readonly object _gate = new();
+
     public AttentionMonitor(
         PaneDiscovery discovery,
         Tmux.ITmuxClient tmux,
@@ -62,11 +66,37 @@ public sealed class AttentionMonitor
             .ToDictionary(a => a.Id, a => new PaneClassifier(a, cfg.StatusLineCount));
     }
 
+    /// <summary>
+    /// One poll. Safe to run on a background thread alongside <see cref="Acknowledge"/>:
+    /// the slow part - enumeration, one capture per pane, and classification - touches no
+    /// tracked state and runs unlocked, and only the state-machine apply takes the lock.
+    /// So an acknowledgement never waits for a capture, which on a Windows host is a
+    /// process spawn per pane.
+    /// </summary>
     public MonitorSnapshot Tick()
     {
         var now = _clock.GetUtcNow();
         var discovered = _discovery.DiscoverPanes();
 
+        // capture is read-only; a failed capture leaves classification to liveness facts
+        // (e.g. Unknown), never crashes the loop. The classifier is pure, so it runs here
+        // with the I/O rather than under the lock.
+        var verdicts = new List<(Pane Pane, Classification Verdict)>();
+        foreach (var pane in discovered.Ok ? discovered.AgentPanes : Array.Empty<Pane>())
+        {
+            var capture = _tmux.CapturePane(pane.Target);
+            verdicts.Add((pane, _classifiers.TryGetValue(pane.AgentId, out var classifier)
+                ? classifier.Inspect(capture.Ok ? capture.StdOut : null, pane.Dead)
+                : Classification.Of(PaneState.Unknown)));
+        }
+
+        lock (_gate)
+            return Apply(discovered, verdicts, now);
+    }
+
+    private MonitorSnapshot Apply(
+        PaneInventory discovered, List<(Pane Pane, Classification Verdict)> verdicts, DateTimeOffset now)
+    {
         // On a hard server/CLI failure, keep prior state and report the error so
         // the watcher stays alive (resilience requirement). The inventory is view-only,
         // so unlike tracked pane state there is nothing worth retaining across a failed
@@ -80,16 +110,9 @@ public sealed class AttentionMonitor
 
         // Only the matched agent panes enter the pipeline below; discovered.OtherPanes is
         // never captured, classified, or tracked - it is passed straight to the snapshot.
-        foreach (var pane in discovered.AgentPanes)
+        foreach (var (pane, verdict) in verdicts)
         {
             seen.Add(pane.Key);
-
-            // capture is read-only; a failed capture leaves classification to
-            // liveness facts (e.g. Unknown), never crashes the loop.
-            var capture = _tmux.CapturePane(pane.Target);
-            var verdict = _classifiers.TryGetValue(pane.AgentId, out var classifier)
-                ? classifier.Inspect(capture.Ok ? capture.StdOut : null, pane.Dead)
-                : Classification.Of(PaneState.Unknown);
             var classified = verdict.State;
 
             // A pane id whose root process pid changed is a different pane wearing a
@@ -273,6 +296,12 @@ public sealed class AttentionMonitor
     /// DONE pane was actually cleared.
     /// </summary>
     public bool Acknowledge(string paneId)
+    {
+        lock (_gate)
+            return AcknowledgeLocked(paneId);
+    }
+
+    private bool AcknowledgeLocked(string paneId)
     {
         if (_tracked.TryGetValue(paneId, out var tracked) && tracked.State == PaneState.Done)
         {
