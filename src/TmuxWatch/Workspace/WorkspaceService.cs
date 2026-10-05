@@ -75,6 +75,10 @@ public sealed class WorkspaceService
         catch (Exception e) when (Expected(e)) { return new(false, e.Message); }
     }
 
+    public WorkspaceResult ImportLatest(string? directory = null) =>
+        WorkspaceFiles.LatestSnapshot(directory) is { } latest ? ImportFile(latest.Path)
+            : new(false, "No saved export found in " + (directory ?? Path.Combine(WorkspaceFiles.DataDirectory, "snapshots")) + ".");
+
     public WorkspaceResult ImportClipboard()
     {
         try { return ImportJson(_clipboard.Read()); }

@@ -25,13 +25,14 @@ var tmux = new TmuxRunner(cfg.TmuxExecutable);
 var discovery = new PaneDiscovery(tmux, cfg);
 var pauses = new PauseStore();
 var workspace = new WorkspaceService(tmux, cfg, pauses);
-if (options.Export || options.ImportPath is not null || options.ImportClipboard)
+if (options.Export || options.ImportPath is not null || options.ImportClipboard || options.ImportLatest)
 {
     WorkspaceResult result;
     try
     {
         result = options.Export ? workspace.Export(options.ExportPath)
             : options.ImportClipboard ? workspace.ImportClipboard()
+            : options.ImportLatest ? workspace.ImportLatest()
             : options.ImportPath == "-" ? workspace.ImportJson(Console.In.ReadToEnd())
             : workspace.ImportFile(options.ImportPath!);
     }
@@ -147,6 +148,7 @@ sealed class CliOptions
     public string? ExportPath { get; private set; }
     public string? ImportPath { get; private set; }
     public bool ImportClipboard { get; private set; }
+    public bool ImportLatest { get; private set; }
 
     public static CliOptions Parse(string[] args)
     {
@@ -168,12 +170,13 @@ sealed class CliOptions
                     if (o.ImportPath.StartsWith("--")) throw new ArgumentException("--import requires a file path or - for stdin.");
                     break;
                 case "--import-clipboard": o.ImportClipboard = true; break;
+                case "--import-latest": o.ImportLatest = true; break;
                 case "--calibrate": o.Calibrate = true; break;
                 case "--once": o.Once = true; break;
                 case "-h" or "--help": o.ShowHelp = true; break;
             }
         }
-        var actions = new[] { o.Export, o.ImportPath is not null, o.ImportClipboard, o.Once, o.Calibrate };
+        var actions = new[] { o.Export, o.ImportPath is not null, o.ImportClipboard, o.ImportLatest, o.Once, o.Calibrate };
         if (actions.Count(a => a) > 1) throw new ArgumentException("Choose one of export, import, once, or calibrate.");
         return o;
     }
@@ -191,7 +194,8 @@ sealed class CliOptions
         AnsiConsole.WriteLine("  --once              Print one classification snapshot and exit");
         AnsiConsole.WriteLine("  --export [path]     Save workspace JSON and copy it to the clipboard");
         AnsiConsole.WriteLine("  --import <path|->   Restore shells from a file or JSON on stdin");
-        AnsiConsole.WriteLine("  --import-clipboard Restore shells from clipboard JSON");
+        AnsiConsole.WriteLine("  --import-clipboard  Restore shells from clipboard JSON");
+        AnsiConsole.WriteLine("  --import-latest     Restore shells from the most recent saved export");
         AnsiConsole.WriteLine("  -h, --help          Show this help");
     }
 }

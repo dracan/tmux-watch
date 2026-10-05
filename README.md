@@ -233,10 +233,13 @@ An explicitly chosen existing file is not overwritten. Export also reports known
 restore blockers, so you can resolve them before rebooting.
 
 After reboot, run the watcher outside the sessions you want to restore, then
-press `i` and enter the saved file path (or leave it empty for clipboard input).
-Terminal commands also work:
+press `i` and press enter to import your latest export; the prompt shows when it
+was saved. Type a file path to import another file, or `clipboard` for clipboard
+input (also the default when no export has been saved yet). Terminal commands
+also work:
 
 ```sh
+./go.sh --import-latest
 ./go.sh --import /path/to/workspace.json
 ./go.sh --import-clipboard
 cat /path/to/workspace.json | ./go.sh --import -

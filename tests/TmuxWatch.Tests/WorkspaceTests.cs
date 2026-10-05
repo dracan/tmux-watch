@@ -1,4 +1,5 @@
 using TmuxWatch.Tmux;
+using TmuxWatch.Tui;
 using TmuxWatch.Workspace;
 
 namespace TmuxWatch.Tests;
@@ -114,6 +115,52 @@ public class WorkspaceTests
         Assert.Equal("one", rows.Paused[0].Pane.SessionName);
         Assert.Single(rows.Other);
         Assert.Equal("two", rows.Other[0].Pane.SessionName);
+    }
+
+    [Fact]
+    public void Latest_snapshot_is_chosen_by_the_timestamp_in_its_name()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tw-latest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            Assert.Null(WorkspaceFiles.LatestSnapshot(directory));
+            var older = Path.Combine(directory, "snapshots-20261003-135439-0219760-aaaa.json");
+            var newer = Path.Combine(directory, "snapshots-20261004-090000-0000000-bbbb.json");
+            File.WriteAllText(newer, "{}");
+            File.WriteAllText(older, "{}");
+            // A later write time does not outrank a later export.
+            File.SetLastWriteTimeUtc(older, DateTime.UtcNow.AddDays(1));
+            File.WriteAllText(Path.Combine(directory, "snapshots-later.json"), "{}");
+            File.WriteAllText(Path.Combine(directory, "snapshots-20261004-090000-0000000-bbbb.json.1a2b.tmp"), "{}");
+            var latest = WorkspaceFiles.LatestSnapshot(directory);
+            Assert.Equal(newer, latest!.Path);
+            Assert.Equal(new DateTimeOffset(2026, 10, 4, 9, 0, 0, TimeSpan.Zero), latest.SavedAt);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void Import_prompt_defaults_to_the_latest_export_and_keeps_clipboard_reachable()
+    {
+        var latest = new SavedSnapshot("/data/snapshots-20261004-090000-0000000-bbbb.json", DateTimeOffset.UtcNow);
+        Assert.Equal((WatcherApp.ImportSource.File, latest.Path), WatcherApp.ResolveImport("", latest));
+        Assert.Equal(WatcherApp.ImportSource.Clipboard, WatcherApp.ResolveImport("", null).Source);
+        Assert.Equal(WatcherApp.ImportSource.Clipboard, WatcherApp.ResolveImport("Clipboard", latest).Source);
+        Assert.Equal(WatcherApp.ImportSource.Json, WatcherApp.ResolveImport("{\"version\": 1}", latest).Source);
+        Assert.Equal((WatcherApp.ImportSource.File, "/tmp/w.json"), WatcherApp.ResolveImport("/tmp/w.json", latest));
+    }
+
+    [Fact]
+    public void Import_latest_without_a_saved_export_creates_nothing()
+    {
+        var calls = new List<string>();
+        var service = new WorkspaceService(new TmuxRunner(args => { calls.Add(args[0]); return new(true, 0, "", ""); }),
+            new(), new PauseStore(Path.Combine(Path.GetTempPath(), "tw-none-" + Guid.NewGuid().ToString("N")), _ => 42));
+        var result = service.ImportLatest(Path.Combine(Path.GetTempPath(), "tw-missing-" + Guid.NewGuid().ToString("N")));
+        Assert.False(result.Success);
+        Assert.Contains("No saved export", result.Message);
+        Assert.Empty(calls);
     }
 
     [Fact]

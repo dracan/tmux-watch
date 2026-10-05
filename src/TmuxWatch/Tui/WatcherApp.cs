@@ -71,6 +71,8 @@ public sealed class WatcherApp
     private readonly PauseStore? _pauseStore;
     private readonly WorkspaceService? _workspace;
     private bool _importPrompt;
+    // Resolved when the prompt opens, so the export it names is the one imported.
+    private SavedSnapshot? _latestExport;
     private string? _workspaceMessage;
 
     // Pane Ids the user has parked. Tracked here (not in the monitor) because it
@@ -629,6 +631,7 @@ public sealed class WatcherApp
                             if (_workspace is not null)
                             {
                                 _importPrompt = true;
+                                _latestExport = WorkspaceFiles.LatestSnapshot();
                                 _prompt = LineEditor.Empty;
                                 Render(frame, ctx);
                             }
@@ -686,8 +689,12 @@ public sealed class WatcherApp
                 {
                     _workspaceMessage = "Restoring workspace...";
                     Render(frame, ctx);
-                    var result = name.Length == 0 ? _workspace.ImportClipboard()
-                        : name.StartsWith('{') ? _workspace.ImportJson(name) : _workspace.ImportFile(name);
+                    var result = ResolveImport(name, _latestExport) switch
+                    {
+                        (ImportSource.Clipboard, _) => _workspace.ImportClipboard(),
+                        (ImportSource.Json, _) => _workspace.ImportJson(name),
+                        (_, var path) => _workspace.ImportFile(path),
+                    };
                     _workspaceMessage = result.Path is null ? result.Message
                         : $"{(result.Success ? "Restore complete" : "Restore stopped; check report")}: {result.Path}";
                     Render(frame, ctx);
@@ -711,7 +718,20 @@ public sealed class WatcherApp
         _prompt = null;
         _promptSession = "";
         _importPrompt = false;
+        _latestExport = null;
     }
+
+    internal enum ImportSource { File, Json, Clipboard }
+
+    /// <summary>
+    /// Empty input imports the latest saved export (the clipboard when there is none),
+    /// the word <c>clipboard</c> reads the clipboard, and anything else is JSON or a path.
+    /// </summary>
+    internal static (ImportSource Source, string Path) ResolveImport(string text, SavedSnapshot? latest) =>
+        text.Length == 0 ? latest is null ? (ImportSource.Clipboard, "") : (ImportSource.File, latest.Path)
+        : text.Equals("clipboard", StringComparison.OrdinalIgnoreCase) ? (ImportSource.Clipboard, "")
+        : text.StartsWith('{') ? (ImportSource.Json, "")
+        : (ImportSource.File, text);
 
     /// <summary>
     /// Create a window in <paramref name="session"/> and jump to it. The create is
@@ -1067,7 +1087,8 @@ public sealed class WatcherApp
         // on screen and keep refreshing while the user types.
         if (_prompt is { } editor)
             parts.Add(_importPrompt ? new Markup(
-                "[yellow]Import workspace[/] [grey]file path (empty = clipboard) >[/] " +
+                "[yellow]Import workspace[/] [grey]path or 'clipboard' (empty = " + Markup.Escape(_latestExport is { } latest
+                    ? $"latest export, saved {latest.SavedAt.ToLocalTime():d MMM HH:mm}" : "clipboard; no saved export") + ") >[/] " +
                 $"{Markup.Escape(editor.Before)}[invert]{Caret(editor)}[/]{Markup.Escape(CaretTail(editor))} " +
                 "[grey]enter = import | esc = cancel[/]") : BuildPromptLine(editor, _promptSession));
         if (_workspace is not null)

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using TmuxWatch.Tmux;
@@ -65,10 +66,26 @@ public sealed class PauseStore
     }
 }
 
+public sealed record SavedSnapshot(string Path, DateTimeOffset SavedAt);
+
 public static class WorkspaceFiles
 {
     public static string DataDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tmux-watch");
+
+    /// <summary>The newest default-location export, by the UTC timestamp in its name.</summary>
+    public static SavedSnapshot? LatestSnapshot(string? directory = null)
+    {
+        directory ??= Path.Combine(DataDirectory, "snapshots");
+        if (!Directory.Exists(directory)) return null;
+        return Directory.EnumerateFiles(directory, "snapshots-*.json")
+            .Select(path => Path.GetFileName(path) is { Length: >= 25 } name &&
+                DateTimeOffset.TryParseExact(name.AsSpan(10, 15), "yyyyMMdd-HHmmss",
+                    CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var saved)
+                ? new SavedSnapshot(path, saved) : null)
+            .Where(s => s is not null)
+            .MaxBy(s => Path.GetFileName(s!.Path), StringComparer.Ordinal);
+    }
 
     public static string NewPath(string kind, string extension) => Path.Combine(DataDirectory, kind,
         $"{kind}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fffffff}-{Guid.NewGuid():N}.{extension}");

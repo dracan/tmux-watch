@@ -42,6 +42,11 @@ structure on tmux and Windows/psmux, allowing geometry to scale and round. It SH
 restore paused settings and report manual resume guidance without executing it.
 Imported text SHALL never become a command position or format expression.
 
+#### Scenario: Import the latest export
+- **WHEN** the user submits the TUI import prompt empty, or runs the latest-export CLI import
+- **THEN** the most recent export saved to the default location is imported, chosen by the timestamp in its name, and the prompt names when it was saved before submission
+- **AND** with no saved export the TUI reads the clipboard and the CLI reports that none exists, creating nothing
+
 #### Scenario: Preflight failure
 - **WHEN** a session name exists, a directory is missing, or a structure is unsupported
 - **THEN** import reports the problems and creates nothing

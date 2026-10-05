@@ -118,7 +118,7 @@ dotnet test                 # full suite
 | `n` | New window in the focused pane's session - prompts inline for a name, then jumps to it |
 | `p` | Pause / resume the highlighted row (shared and persistent; non-agent rows supported) |
 | `e` | Save a workspace snapshot and copy its JSON to the clipboard |
-| `i` | Import a snapshot file or clipboard JSON through a modal prompt |
+| `i` | Import a snapshot through a modal prompt: enter alone takes the latest export, or type a path or `clipboard` |
 | `o` | Show / hide the Other panes table (default: shown) |
 | `c` | Include / exclude companion panes - non-agent panes sharing a window with an agent (default: included) |
 | `w` | Wide mode: show the Path and Loc columns |
